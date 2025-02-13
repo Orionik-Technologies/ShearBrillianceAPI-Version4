@@ -1,4 +1,4 @@
-# Shear_Brilliance_api
+# Shear_Brilliance_api Payment
 
 Here’s a basic README.md template for your Salon Appointment Booking System. You can customize it based on the specifics of your project and stack.
 
