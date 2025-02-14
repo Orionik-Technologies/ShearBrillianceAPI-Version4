@@ -1,10 +1,11 @@
 
 const pg = require('pg');
 module.exports = {
-    HOST: "ep-floral-scene-a4hi3ss2-pooler.us-east-1.aws.neon.tech",
+  // postgresql://neondb_owner:npg_92gmBlhZGKfR@ep-noisy-heart-a6h3zgis-pooler.us-west-2.aws.neon.tech/neondb?sslmode=require
+    HOST: "ep-noisy-heart-a6h3zgis-pooler.us-west-2.aws.neon.tech",
     USER: "neondb_owner",
-    PASSWORD: "npg_cqv4zK7wMnUS",
-    DB: "TestCheck",
+    PASSWORD: "npg_92gmBlhZGKfR",
+    DB: "neondb",
     dialect: "postgresql",
     dialectModule:pg,
     pool: {

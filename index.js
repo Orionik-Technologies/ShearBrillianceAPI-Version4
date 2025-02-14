@@ -48,12 +48,16 @@ syncDatabase();
 
 // Serve static files
 app.use(express.static(path.join(__dirname, 'public')));
-app.use('/api/v3/api-docs', express.static(path.join(__dirname, 'public/swagger')));
+app.use('/api/v4/api-docs', express.static(path.join(__dirname, 'public/swagger')));
 
 // Basic route
 app.get('/', (req, res) => {
   res.status(200).send('Shear Brilliance App is running!');
 });
+
+
+// Define port
+const PORT = process.env.PORT || 8012;
 
 // Swagger setup
 const swaggerOptions = {
@@ -88,7 +92,7 @@ const swaggerOptions = {
 };
 
 const swaggerDocs = swaggerJsDoc(swaggerOptions);
-app.use('/api/v3/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocs));
+app.use('/api/v4/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocs));
 
 
 
@@ -111,9 +115,6 @@ require('./app/routes/barberleave.routes')(app);
 require('./app/routes/sales.routes')(app);
 require('./app/routes/slot.routes')(app);
 require('./app/routes/transferAppointmentsOnLeave.routes')(app);
-
-// Define port
-const PORT = process.env.PORT || 8012;
 
 // // Initialize Socket.io and Controllers
 socketController.initialize(io); // Initialize the Socket.IO instance

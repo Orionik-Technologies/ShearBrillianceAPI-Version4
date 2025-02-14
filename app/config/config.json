@@ -1,6 +1,6 @@
 {
   "development": {
-  "url": "postgres://neondb_owner:npg_cqv4zK7wMnUS@ep-floral-scene-a4hi3ss2-pooler.us-east-1.aws.neon.tech/TestCheck?sslmode=require",
+  "url": "postgresql://neondb_owner:npg_92gmBlhZGKfR@ep-noisy-heart-a6h3zgis-pooler.us-west-2.aws.neon.tech/neondb?sslmode=require",
   "dialect": "postgres",
   "dialectOptions": {
       "ssl": {
@@ -10,7 +10,7 @@
     }
   },
   "test": {
-    "url": "postgres://neondb_owner:npg_cqv4zK7wMnUS@ep-floral-scene-a4hi3ss2-pooler.us-east-1.aws.neon.tech/TestCheck?sslmode=require",
+    "url": "postgresql://neondb_owner:npg_92gmBlhZGKfR@ep-noisy-heart-a6h3zgis-pooler.us-west-2.aws.neon.tech/neondb?sslmode=require",
     "dialect": "postgres",
     "dialectOptions": {
       "ssl": {
@@ -20,7 +20,7 @@
     }
   },
   "production": {
-    "url": "postgres://neondb_owner:npg_cqv4zK7wMnUS@ep-floral-scene-a4hi3ss2-pooler.us-east-1.aws.neon.tech/TestCheck?sslmode=require",
+    "url": "postgresql://neondb_owner:npg_92gmBlhZGKfR@ep-noisy-heart-a6h3zgis-pooler.us-west-2.aws.neon.tech/neondb?sslmode=require",
     "dialect": "postgres",
     "dialectOptions": {
         "ssl": {
