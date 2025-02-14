@@ -150,7 +150,7 @@ module.exports = (app) => {
    *       500:
    *         description: Internal server error
    */
-  app.post(`${apiPrefix}/create`, authenticateJWT, paymentController.createPayment);
+  app.post(`${apiPrefix}/create`,  paymentController.createPayment);
 
   /**
    * @swagger
