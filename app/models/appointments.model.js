@@ -97,7 +97,11 @@ module.exports = (sequelize, Sequelize) => {
         appointment_date: {
             type: Sequelize.DATEONLY,
             allowNull: true
-        }
+        },
+        paymentStatus: {
+            type: Sequelize.ENUM("Pending", "Success", "Failed"),
+            defaultValue: "Pending"
+        },
     });
 
     // Define relationships with onUpdate and onDelete options
@@ -132,6 +136,10 @@ module.exports = (sequelize, Sequelize) => {
         foreignKey: 'AppointmentId', 
         otherKey: 'ServiceId' 
     });
+
+    Appointment.associate = (models) => {
+        Appointment.hasOne(models.Payment, { foreignKey: "appointmentId" });
+    };
 
 
 
