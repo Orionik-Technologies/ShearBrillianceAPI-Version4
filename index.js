@@ -115,6 +115,7 @@ require('./app/routes/barberleave.routes')(app);
 require('./app/routes/sales.routes')(app);
 require('./app/routes/slot.routes')(app);
 require('./app/routes/transferAppointmentsOnLeave.routes')(app);
+require('./app/routes/payment.routes')(app);
 
 // // Initialize Socket.io and Controllers
 socketController.initialize(io); // Initialize the Socket.IO instance
