@@ -50,7 +50,6 @@ db.HaircutDetails = require("./haircutdetails.model.js")(sequelize, Sequelize);
 // Add Service model
 db.Service = require("./service.model.js")(sequelize, Sequelize);
 
-
 // Add Barber model
 db.Barber = require("./barber.model.js")(sequelize, Sequelize);
 
@@ -72,6 +71,8 @@ db.fcmTokens = require("./fcmTokens.model.js")(sequelize, Sequelize);
 //Add Slot model
 db.Slot= require("./slot.model.js")(sequelize, Sequelize);
 
+//Add Career model
+db.Career = require("./Career.model.js")(sequelize, Sequelize);
+
 
 module.exports = db;
-
