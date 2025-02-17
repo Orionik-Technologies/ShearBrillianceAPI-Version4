@@ -6,6 +6,8 @@ const fs = require('fs');
 const { Op } = require("sequelize");
 const AWS = require('aws-sdk');
 const validateInput = require('../helpers/validatorHelper');
+const { sendEmail } = require("../services/emailService");
+const { CREATE_CAREER_TEMPLATE_ID, CONTACT_US_MAIL } = require("../config/sendGridConfig");
 
 
 const s3 = new AWS.S3({
@@ -135,6 +137,33 @@ exports.create = async (req, res) => {
             resume: resumeUrl,
             status: "Pending"
         });
+
+        const emailData = {
+            fullName : fullName,
+            email : email,
+            mobileNo : mobileNo,
+            coreSkills : coreSkills,
+            additionalSkills : additionalSkills,
+            totalExperience : totalExperience,
+            currentCompany : currentCompany,
+            currentSalary : currentSalary,
+            expectedSalary : expectedSalary,
+            noticePeriod : noticePeriod,
+            currentLocation : currentLocation,
+            reasonForChange : reasonForChange,
+            aboutYou : aboutYou,
+            source : source,
+            referredBy : referredBy,
+            resume : resumeUrl,
+            company_name: 'Shear Brilliance',  // Customize with your company name
+            currentYear: new Date().getFullYear()
+        }
+
+        console.log('Email Data:', emailData);
+
+        await sendEmail(CONTACT_US_MAIL, "New Career Profile Created", CREATE_CAREER_TEMPLATE_ID, emailData);
+
+        console.log('Career profile created successfully:', career);
 
         return sendResponse(res, true, 'Career profile created successfully', { career }, 201);
     } catch (error) {

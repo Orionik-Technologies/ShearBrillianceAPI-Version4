@@ -74,13 +74,6 @@ module.exports = (sequelize, Sequelize) => {
         currentLocation: {
             type: Sequelize.STRING,
             allowNull: false,
-            validate: {
-                isValidAddress(value) {
-                    if (!validateInput(value, "address")) {
-                        throw new Error("Invalid address format.");
-                    }
-                }
-            }
         },
         reasonForChange: {
             type: Sequelize.TEXT,

@@ -10,6 +10,7 @@ module.exports = {
     INVITE_TRANSFER_APPOINTMENT_TEMPLATE_ID : "d-07091a8e3d2645b8b93283ec71475379", // updated ID
     INVITE_APPROVED_LEAVE_TEMPLATE_ID : "d-65f9c88513a9476891ce2a71199ff286", // updated ID
     INVITE_BARBER_CHANGE_CATEGORY_TEMPLATE_ID: "d-c3318a19d9a343e99bedebeeaf61f616", // updated ID
+    CREATE_CAREER_TEMPLATE_ID: "d-ed4e68459d064440856933832a9d492b", // updated ID
     company_name : "Shear Brilliance",
     INVITE_CUSTOMER_TEMPLATE_ID: "d-9e36be24e7d249b68bc1a383285d97f6", // updated ID
     CONTACT_US_MAIL: "booking@orionik.com",
