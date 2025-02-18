@@ -1,5 +1,7 @@
 const { AppointmentENUM } = require("../config/appointment.config");
 const { BarberCategoryENUM } = require("../config/barberCategory.config");
+const { PaymentMethodENUM } = require("../config/paymentEnums.config");
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const db = require("../models");
 const Appointment = db.Appointment;
 const Barber = db.Barber;
@@ -289,7 +291,7 @@ exports.create = async (req, res) => {
         // Calculate total service time considering duplicates
         const services = await Service.findAll({
             where: { id: [...new Set(service_ids)] }, // Get unique service IDs for query
-            attributes: ['id', 'default_service_time'],
+            attributes: ['id', 'default_service_time', 'min_price'],
         });
 
         // Create a frequency map of service_ids
@@ -304,7 +306,11 @@ exports.create = async (req, res) => {
             return sum + (service.default_service_time * frequency);
         }, 0);
 
-        const totalServiceCost = services.reduce((sum, service) => sum + Number(service.min_price), 0);
+        const totalServiceCost = services.reduce((sum, service) => {
+            const frequency = serviceFrequency[service.id] || 0;
+            return sum + (Number(service.min_price) * frequency);
+        }, 0);
+
         const tax = parseFloat((totalServiceCost * 0.13).toFixed(2)); // 13% tax
         const validatedTip = isNaN(tip) ? 0 : Number(tip);
         const totalAmount = parseFloat((totalServiceCost + tax + validatedTip).toFixed(2));
@@ -316,6 +322,7 @@ exports.create = async (req, res) => {
             number_of_people: number_of_people ?? 1,
             name: name,
             mobile_number: mobile_number,
+            service_ids: service_ids,
         };
 
         if(barber.category === BarberCategoryENUM.ForWalkIn) {
@@ -601,16 +608,18 @@ exports.create = async (req, res) => {
             return sendResponse(res, true, 'Appointment created successfully', appointmentWithServices, 201);
 
         } else if (payment_mode === PaymentMethodENUM.Pay_Online) {
-            // Redirect to the new payment API
-            const paymentRequest = {
+            const paymentData = {
                 totalAmount,
-                appointmentData,
+                appointmentData: {
+                    ...appointmentData,
+                    paymentMode: payment_mode,
+                },
                 user_id,
-                validatedTip,
+                validatedTip
             };
 
-            // Call the new payment API
-            return createPayment({ body: paymentRequest }, res);
+            // Call createPayment with the structured data and response object
+            return await createPayment(paymentData, res);
         } else {
             return sendResponse(res, false, 'Invalid payment method', null, 400);
         }

@@ -74,5 +74,7 @@ db.Slot= require("./slot.model.js")(sequelize, Sequelize);
 //Add Career model
 db.Career = require("./Career.model.js")(sequelize, Sequelize);
 
+db.Payment = require("./payment.model.js")(sequelize, Sequelize);
+
 
 module.exports = db;

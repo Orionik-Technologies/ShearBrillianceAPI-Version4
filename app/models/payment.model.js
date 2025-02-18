@@ -59,17 +59,6 @@ module.exports = (sequelize, Sequelize) => {
             ),
             defaultValue: "Pending"
         },
-        paymentMethod: {
-            type: Sequelize.ENUM(
-                "Credit_Card",
-                "Debit_Card",
-                "Bank_Transfer",
-                "Digital_Wallet",
-                "Cash",
-                "Other"
-            ),
-            allowNull: false
-        },
         paymentIntentId: {
             type: Sequelize.STRING,
             allowNull: true

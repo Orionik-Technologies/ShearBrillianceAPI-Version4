@@ -1,8 +1,13 @@
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-const { Payment, Appointment } = require('../models'); // Adjust the path as necessary
-const sendResponse = require('../helpers/responseHelper'); // Import the helper
+const sendResponse = require('../helpers/responseHelper'); // Import the helper function
+const db = require("../models");
+const { PaymentMethodENUM } = require('../config/paymentEnums.config');
+const { Payment, Appointment } = require('../models'); // Adjust path as needed
 
-// Function to create a payment intent
+
+
+
+
 async function createPaymentIntent({ totalAmount, appointmentData, user_id, validatedTip }) {
     const totalAmountCents = Math.round(totalAmount * 100);
 
@@ -10,8 +15,8 @@ async function createPaymentIntent({ totalAmount, appointmentData, user_id, vali
         amount: totalAmountCents,
         currency: 'usd',
         metadata: {
-            userId: user_id,
-            tip: validatedTip,
+            userId: user_id.toString(),
+            tip: validatedTip.toString(),
             appointmentData: JSON.stringify(appointmentData),
         },
     });
@@ -20,9 +25,9 @@ async function createPaymentIntent({ totalAmount, appointmentData, user_id, vali
 }
 
 // API to handle payment creation
-exports.createPayment = async (req, res) => {
+exports.createPayment = async (paymentData, res) => {
     try {
-        const { totalAmount, appointmentData, user_id, validatedTip } = req.body;
+        const { totalAmount, appointmentData, user_id, validatedTip } = paymentData;
 
         // Validate required fields
         if (!totalAmount || !appointmentData || !user_id) {
@@ -32,17 +37,117 @@ exports.createPayment = async (req, res) => {
         // Generate payment intent
         const paymentIntent = await createPaymentIntent({
             totalAmount,
-            appointmentData,
+            appointmentData: {
+                ...appointmentData,
+                Services: service_ids // Ensure services are included
+            },
             user_id,
-            validatedTip,
+            validatedTip
         });
 
-        return sendResponse(res, true, 'Payment initiated. Complete payment to confirm.', { paymentIntent });
+        return sendResponse(res, true, 'Payment initiated successfully', {
+            paymentIntent
+        }, 200);
+
     } catch (error) {
         console.error("Error creating payment:", error);
         return sendResponse(res, false, error.message || 'Internal Server Error', null, 500);
     }
 };
+
+exports.testWebhook = async (req, res) => {
+    try {
+        const event = req.body; // Directly use the request body for testing
+
+        // Handle different event types
+        switch (event.type) {
+            case 'payment_intent.succeeded':
+                await handlePaymentSuccess(event.data.object);
+                break;
+
+            case 'payment_intent.payment_failed':
+                await handlePaymentFailure(event.data.object);
+                break;
+
+            default:
+                console.log(`Unhandled event type: ${event.type}`);
+        }
+
+        // Respond to acknowledge receipt of the event
+        res.json({ received: true });
+    } catch (err) {
+        console.error('Error processing webhook:', err.message);
+        res.status(400).send(`Webhook Error: ${err.message}`);
+    }
+};
+
+
+// Helper function to handle successful payments
+async function handlePaymentSuccess(paymentIntent) {
+    try {
+        // Extract metadata from the payment intent
+        const { appointmentData, userId, tip } = paymentIntent.metadata;
+
+        // Parse appointment data from metadata
+        const parsedAppointmentData = JSON.parse(appointmentData);
+
+        // Directly create the appointment
+        const appointment = await Appointment.create({
+            ...parsedAppointmentData,
+            paymentStatus: 'Success', // Mark payment as successful
+        });
+
+        console.log(`Appointment created for ID: ${appointment.id}`);
+
+        // Calculate amounts from the payment intent
+        const totalAmount = paymentIntent.amount / 100; // Convert cents to dollars
+        const tax = parseFloat((totalAmount * 0.13).toFixed(2)); // Assuming tax is 13%
+        const serviceTotal = totalAmount - tax - (tip || 0); // Calculate service total (excluding tax and tip)
+
+        // Create payment record
+        try {
+            const payment = await Payment.create({
+                appointmentId: appointment.id,
+                userId: userId,
+                amount: serviceTotal,
+                tax: tax,
+                tip: tip || 0,
+                totalAmount: totalAmount,
+                currency: paymentIntent.currency.toUpperCase(),
+                paymentStatus: 'Success',
+                paymentIntentId: paymentIntent.id,
+            });
+            console.log("Payment created successfully:", payment);
+        } catch (err) {
+            console.error("Error creating payment:", err);
+            throw new Error("Error creating payment record");
+        }
+
+        console.log(`Payment record created for appointment ID: ${appointment.id}`);
+    } catch (err) {
+        console.error('Error handling successful payment:', err.message);
+        throw new Error('Error processing successful payment');
+    }
+}
+
+// Helper function to handle failed payments
+async function handlePaymentFailure(paymentIntent) {
+    try {
+        // Update the payment record with failure status and reason
+        await Payment.update(
+            {
+                paymentStatus: 'Failed',
+                failureReason: paymentIntent.last_payment_error?.message || 'Unknown error',
+            },
+            { where: { paymentIntentId: paymentIntent.id } }
+        );
+
+        console.log(`Payment failed for intent ID: ${paymentIntent.id}`);
+    } catch (err) {
+        console.error('Error handling failed payment:', err.message);
+        throw new Error('Error processing failed payment');
+    }
+}
 
 exports.handleWebhook = async (req, res) => {
     const sig = req.headers['stripe-signature'];
@@ -77,75 +182,3 @@ exports.handleWebhook = async (req, res) => {
     // Respond to Stripe to acknowledge receipt of the event
     res.json({ received: true });
 };
-
-// Helper function to handle successful payments
-async function handlePaymentSuccess(paymentIntent) {
-    try {
-        // Extract metadata from the payment intent
-        const { appointmentData, userId, tip } = paymentIntent.metadata;
-
-        // Parse appointment data from metadata
-        const parsedAppointmentData = JSON.parse(appointmentData);
-
-        // Check if the appointment already exists
-        let appointment = await Appointment.findOne({
-            where: { id: parsedAppointmentData.id },
-        });
-
-        if (!appointment) {
-            // If the appointment doesn't exist, create it
-            appointment = await Appointment.create({
-                ...parsedAppointmentData,
-                paymentStatus: 'Success', // Mark payment as successful
-            });
-
-            console.log(`Appointment created for ID: ${appointment.id}`);
-        } else {
-            // Update the appointment's payment status
-            await appointment.update({ paymentStatus: 'Success' });
-        }
-
-        // Calculate amounts from the payment intent
-        const totalAmount = paymentIntent.amount / 100; // Convert cents to dollars
-        const tax = parseFloat((totalAmount * 0.13).toFixed(2)); // Assuming tax is 13%
-        const serviceTotal = totalAmount - tax - (tip || 0); // Calculate service total (excluding tax and tip)
-
-        // Create the payment record in the database
-        await Payment.create({
-            appointmentId: appointment.id,
-            userId: userId,
-            amount: serviceTotal, // Service total (before tax and tip)
-            tax: tax, // Tax amount
-            tip: tip || 0, // Tip amount from metadata
-            totalAmount: totalAmount, // Total amount (service total + tax + tip)
-            currency: paymentIntent.currency.toUpperCase(),
-            paymentStatus: 'Success',
-            paymentMethod: 'Credit_Card',
-            paymentIntentId: paymentIntent.id,
-        });
-
-        console.log(`Payment record created for appointment ID: ${appointment.id}`);
-    } catch (err) {
-        console.error('Error handling successful payment:', err.message);
-        throw new Error('Error processing successful payment');
-    }
-}
-
-// Helper function to handle failed payments
-async function handlePaymentFailure(paymentIntent) {
-    try {
-        // Update the payment record with failure status and reason
-        await Payment.update(
-            {
-                paymentStatus: 'Failed',
-                failureReason: paymentIntent.last_payment_error?.message || 'Unknown error',
-            },
-            { where: { paymentIntentId: paymentIntent.id } }
-        );
-
-        console.log(`Payment failed for intent ID: ${paymentIntent.id}`);
-    } catch (err) {
-        console.error('Error handling failed payment:', err.message);
-        throw new Error('Error processing failed payment');
-    }
-}

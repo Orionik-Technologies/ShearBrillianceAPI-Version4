@@ -230,4 +230,59 @@ module.exports = (app) => {
    *           description: Reason for payment failure (if applicable)
    */
   app.post(`${apiPrefix}/webhook`, express.raw({ type: 'application/json' }), paymentController.handleWebhook);
+
+  /**
+   * @swagger
+   * paths:
+   *   /api/payment/testwebhook:
+   *     post:
+   *       summary: Simulate Stripe Webhook
+   *       description: Simulates a Stripe webhook event for testing purposes.
+   *       tags:
+   *         - Payments
+   *       requestBody:
+   *         required: true
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 id:
+   *                   type: string
+   *                   example: evt_12345
+   *                 type:
+   *                   type: string
+   *                   example: payment_intent.succeeded
+   *                 data:
+   *                   type: object
+   *                   properties:
+   *                     object:
+   *                       type: object
+   *                       example:
+   *                         id: "pi_12345"
+   *                         amount: 5000
+   *                         currency: "usd"
+   *                         metadata:
+   *                           userId: "123"
+   *                           tip: "5"
+   *                           appointmentData: '{"id":1,"name":"John Doe"}'
+   *       responses:
+   *         200:
+   *           description: Webhook processed successfully
+   *           content:
+   *             application/json:
+   *               schema:
+   *                 type: object
+   *                 properties:
+   *                   received:
+   *                     type: boolean
+   *                     example: true
+   *         400:
+   *           description: Webhook Error
+   */
+  app.post(`${apiPrefix}/testwebhook`, express.raw({ type: 'application/json' }), paymentController.testWebhook);
+
+
+
+  
 };
