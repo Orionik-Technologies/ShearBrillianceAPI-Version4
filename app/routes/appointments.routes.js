@@ -14,183 +14,225 @@ module.exports = (app) => {
  *   description: Appointment management API
  */
 
-    /**
-    * @swagger
-    * /api/appointments:
-    *   post:
-    *     summary: Create a new appointment
-    *     description: Creates either a walk-in (category 2) or scheduled appointment (category 1) based on barber category
-    *     tags: [Appointments]
-    *     security:
-    *       - bearerAuth: []
-    *     requestBody:
-    *       required: true
-    *       content:
-    *         application/json:
-    *           schema:
-    *             type: object
-    *             required:
-    *               - barber_id
-    *               - salon_id
-    *               - number_of_people
-    *               - name
-    *               - mobile_number
-    *               - service_ids
-    *             properties:
-    *               user_id:
-    *                 type: integer
-    *                 description: ID of the user making the appointment (optional if authenticated)
-    *               barber_id:
-    *                 type: integer
-    *                 description: ID of the barber assigned to the appointment
-    *               salon_id:
-    *                 type: integer
-    *                 description: ID of the salon
-    *               number_of_people:
-    *                 type: integer
-    *                 description: Number of people for the appointment
-    *                 minimum: 1
-    *               name:
-    *                 type: string
-    *                 description: Name of the user making the appointment
-    *               mobile_number:
-    *                 type: string
-    *                 description: Mobile number of the user making the appointment
-    *                 pattern: '^[0-9]+$'
-    *               service_ids:
-    *                 type: array
-    *                 items:
-    *                   type: integer
-    *                 description: Array of service IDs associated with the appointment
-    *                 minItems: 1
-    *               slot_id:
-    *                 type: integer
-    *                 description: Required for category 1 (appointment-based) barbers. ID of the selected time slot
-    *             example:
-    *               user_id: 1
-    *               barber_id: 2
-    *               salon_id: 1
-    *               number_of_people: 1
-    *               name: "John Doe"
-    *               mobile_number: "1234567890"
-    *               service_ids: [1, 2]
-    *               slot_id: 5
-    *     responses:
-    *       201:
-    *         description: Appointment created successfully
-    *         content:
-    *           application/json:
-    *             schema:
-    *               type: object
-    *               properties:
-    *                 success:
-    *                   type: boolean
-    *                   example: true
-    *                 message:
-    *                   type: string
-    *                   example: "Appointment created successfully"
-    *                 data:
-    *                   type: object
-    *                   properties:
-    *                     id:
-    *                       type: integer
-    *                       example: 1
-    *                     UserId:
-    *                       type: integer
-    *                       example: 1
-    *                     BarberId:
-    *                       type: integer
-    *                       example: 2
-    *                     SalonId:
-    *                       type: integer
-    *                       example: 1
-    *                     SlotId:
-    *                       type: integer
-    *                       example: 5
-    *                     status:
-    *                       type: string
-    *                       enum: [checked_in, in_salon, completed, canceled]
-    *                       example: "checked_in"
-    *                     estimated_wait_time:
-    *                       type: integer
-    *                       example: 30
-    *                       description: Only for category 2 (walk-in)
-    *                     queue_position:
-    *                       type: integer
-    *                       example: 2
-    *                       description: Only for category 2 (walk-in)
-    *                     appointment_date:
-    *                       type: string
-    *                       format: date
-    *                       example: "2024-12-31"
-    *                       description: Only for category 1 (appointment)
-    *                     appointment_start_time:
-    *                       type: string
-    *                       format: time
-    *                       example: "14:30:00"
-    *                       description: Only for category 1 (appointment)
-    *                     appointment_end_time:
-    *                       type: string
-    *                       format: time
-    *                       example: "15:00:00"
-    *                       description: Only for category 1 (appointment)
-    *                     Services:
-    *                       type: array
-    *                       items:
-    *                         type: object
-    *                         properties:
-    *                           id:
-    *                             type: integer
-    *                             example: 1
-    *                           name:
-    *                             type: string
-    *                             example: "Haircut"
-    *                           default_service_time:
-    *                             type: integer
-    *                             example: 30
-    *                 code:
-    *                   type: integer
-    *                   example: 201
-    *       400:
-    *         description: Bad request
-    *         content:
-    *           application/json:
-    *             schema:
-    *               type: object
-    *               properties:
-    *                 success:
-    *                   type: boolean
-    *                   example: false
-    *                 message:
-    *                   type: string
-    *                   example: "You already have an active appointment"
-    *                 data:
-    *                   type: null
-    *                 code:
-    *                   type: integer
-    *                   example: 400
-    *       401:
-    *         description: Unauthorized - Invalid or missing authentication token
-    *       500:
-    *         description: Internal server error
-    *         content:
-    *           application/json:
-    *             schema:
-    *               type: object
-    *               properties:
-    *                 success:
-    *                   type: boolean
-    *                   example: false
-    *                 message:
-    *                   type: string
-    *                   example: "Internal Server Error"
-    *                 data:
-    *                   type: null
-    *                 code:
-    *                   type: integer
-    *                   example: 500
-    */
-   app.post(`${apiPrefix}`, [authenticateToken], appointmentsController.create);
+   /**
+ * @swagger
+ * /api/appointments:
+ *   post:
+ *     summary: Create a new appointment
+ *     description: Creates either a walk-in (category 2) or scheduled appointment (category 1) based on barber category, with payment processing
+ *     tags: [Appointments]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - barber_id
+ *               - salon_id
+ *               - number_of_people
+ *               - name
+ *               - mobile_number
+ *               - service_ids
+ *               - payment_mode
+ *             properties:
+ *               user_id:
+ *                 type: integer
+ *                 description: ID of the user making the appointment (optional if authenticated)
+ *               barber_id:
+ *                 type: integer
+ *                 description: ID of the barber assigned to the appointment
+ *               salon_id:
+ *                 type: integer
+ *                 description: ID of the salon
+ *               number_of_people:
+ *                 type: integer
+ *                 description: Number of people for the appointment
+ *                 minimum: 1
+ *               name:
+ *                 type: string
+ *                 description: Name of the user making the appointment
+ *               mobile_number:
+ *                 type: string
+ *                 description: Mobile number of the user making the appointment
+ *                 pattern: '^[0-9]+$'
+ *               service_ids:
+ *                 type: array
+ *                 items:
+ *                   type: integer
+ *                 description: Array of service IDs associated with the appointment
+ *                 minItems: 1
+ *               slot_id:
+ *                 type: integer
+ *                 description: Required for category 1 (appointment-based) barbers. ID of the selected time slot
+ *               payment_mode:
+ *                 type: string
+ *                 enum: [pay_in_person, pay_online]
+ *                 description: Payment method for the appointment
+ *               tip:
+ *                 type: number
+ *                 description: Optional tip amount
+ *                 minimum: 0
+ *             example:
+ *               user_id: 1
+ *               barber_id: 2
+ *               salon_id: 1
+ *               number_of_people: 1
+ *               name: "John Doe"
+ *               mobile_number: "1234567890"
+ *               service_ids: [1, 2]
+ *               slot_id: 5
+ *               payment_mode: "pay_in_person"
+ *               tip: 5.00
+ *     responses:
+ *       201:
+ *         description: Appointment created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Appointment created successfully"
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: integer
+ *                       example: 1
+ *                     UserId:
+ *                       type: integer
+ *                       example: 1
+ *                     BarberId:
+ *                       type: integer
+ *                       example: 2
+ *                     SalonId:
+ *                       type: integer
+ *                       example: 1
+ *                     SlotId:
+ *                       type: integer
+ *                       example: 5
+ *                     status:
+ *                       type: string
+ *                       enum: [pending, checked_in, in_salon, completed, canceled]
+ *                       example: "pending"
+ *                     paymentStatus:
+ *                       type: string
+ *                       enum: [pending, completed, failed]
+ *                       example: "pending"
+ *                     estimated_wait_time:
+ *                       type: integer
+ *                       example: 30
+ *                       description: Only for category 2 (walk-in)
+ *                     queue_position:
+ *                       type: integer
+ *                       example: 2
+ *                       description: Only for category 2 (walk-in)
+ *                     appointment_date:
+ *                       type: string
+ *                       format: date
+ *                       example: "2024-12-31"
+ *                       description: Only for category 1 (appointment)
+ *                     appointment_start_time:
+ *                       type: string
+ *                       format: time
+ *                       example: "14:30:00"
+ *                       description: Only for category 1 (appointment)
+ *                     appointment_end_time:
+ *                       type: string
+ *                       format: time
+ *                       example: "15:00:00"
+ *                       description: Only for category 1 (appointment)
+ *                     Services:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           id:
+ *                             type: integer
+ *                             example: 1
+ *                           name:
+ *                             type: string
+ *                             example: "Haircut"
+ *                           default_service_time:
+ *                             type: integer
+ *                             example: 30
+ *                           min_price:
+ *                             type: number
+ *                             example: 25.00
+ *                           max_price:
+ *                             type: number
+ *                             example: 35.00
+ *                     payment:
+ *                       type: object
+ *                       properties:
+ *                         amount:
+ *                           type: number
+ *                           example: 25.00
+ *                         tax:
+ *                           type: number
+ *                           example: 3.25
+ *                         tip:
+ *                           type: number
+ *                           example: 5.00
+ *                         totalAmount:
+ *                           type: number
+ *                           example: 33.25
+ *                         paymentStatus:
+ *                           type: string
+ *                           example: "pending"
+ *                         paymentMethod:
+ *                           type: string
+ *                           example: "pay_in_person"
+ *                 code:
+ *                   type: integer
+ *                   example: 201
+ *       400:
+ *         description: Bad request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "You already have an active appointment"
+ *                 data:
+ *                   type: null
+ *                 code:
+ *                   type: integer
+ *                   example: 400
+ *       401:
+ *         description: Unauthorized - Invalid or missing authentication token
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Internal Server Error"
+ *                 data:
+ *                   type: null
+ *                 code:
+ *                   type: integer
+ *                   example: 500
+ */
+    app.post(`${apiPrefix}`, [authenticateToken], appointmentsController.create);
    
 /**
  * @swagger

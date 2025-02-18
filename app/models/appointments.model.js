@@ -102,6 +102,17 @@ module.exports = (sequelize, Sequelize) => {
             type: Sequelize.ENUM("Pending", "Success", "Failed"),
             defaultValue: "Pending"
         },
+        paymentMode: {
+            type: Sequelize.ENUM(
+                "Pay_In_Person",
+                "Pay_Online"
+            ),
+            allowNull: false
+        },
+        stripePaymentIntentId: {
+            type: Sequelize.STRING,
+            allowNull: true
+        },
     });
 
     // Define relationships with onUpdate and onDelete options

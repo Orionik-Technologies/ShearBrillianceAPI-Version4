@@ -29,7 +29,7 @@ const { broadcastBoardUpdates } = require('../controllers/socket.controller');
 const { sendNotificationToUser } = require("../services/notificationService");
 const { INVITE_BOOKING_APPOINTMENT_TEMPLATE_ID } = require("../config/sendGridConfig");
 const {INVITE_CANCEL_APPOINTMENT_TEMPLATE_ID} =require("../config/sendGridConfig");
-
+const { createPayment } = require('../controllers/payment.controller');
 
 
 let io; // Declare io in the controller's scope
@@ -277,7 +277,7 @@ async function sendAppointmentNotifications(appointment, name, mobile_number, us
 
 exports.create = async (req, res) => {
     try {
-      let { user_id, salon_id, barber_id, number_of_people, name, mobile_number, service_ids, slot_id } = req.body;
+      let { user_id, salon_id, barber_id, number_of_people, name, mobile_number, service_ids, slot_id, payment_mode, tip } = req.body;
       user_id = req.user ? req.user.id : user_id;
   
       // Get barber details including category
@@ -304,277 +304,316 @@ exports.create = async (req, res) => {
             return sum + (service.default_service_time * frequency);
         }, 0);
 
-    let appointmentData = {
-        UserId: user_id,
-        BarberId: barber_id,
-        SalonId: salon_id,
-        number_of_people: number_of_people ?? 1,
-        name: name,
-        mobile_number: mobile_number,
-    };
+        const totalServiceCost = services.reduce((sum, service) => sum + Number(service.min_price), 0);
+        const tax = parseFloat((totalServiceCost * 0.13).toFixed(2)); // 13% tax
+        const validatedTip = isNaN(tip) ? 0 : Number(tip);
+        const totalAmount = parseFloat((totalServiceCost + tax + validatedTip).toFixed(2));
 
-    if(barber.category === BarberCategoryENUM.ForWalkIn) {
-        // Walk-in logic
-        const today = new Date();
-        const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0);
-        const todayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999);
-
-            // Check if the user already has an active appointment
-            const activeAppointment = await Appointment.findOne({
-                where: { UserId: user_id, status: [AppointmentENUM.Checked_in, AppointmentENUM.In_salon] }
-            });
-            if (activeAppointment) {
-                return res.status(400).send({
-                success: false,
-                message: "You already have an active appointment. Please complete or cancel it before booking a new one.",
-                data: null,
-                code: 400,
-                });
-            }
-
-         // Retrieve the barber session
-        const barberSession = await BarberSession.findOne({
-            where: {
+        let appointmentData = {
+            UserId: user_id,
             BarberId: barber_id,
-            session_date: { [Op.between]: [todayStart, todayEnd] }
-            },
-            attributes: ['id', 'start_time', 'end_time', 'session_date', 'remaining_time']
-        });
-    
-      if (!barberSession) {
-        return sendResponse(res, false, 'Barber is not available for appointments today', null, 400);
-      }
-  
-      // Check for existing appointments for the barber
-      const activeBarberAppointments = await Appointment.findAll({
-        where: {
-          BarberId: barber_id,
-          status: [AppointmentENUM.Checked_in, AppointmentENUM.In_salon]
-        },
-      });
-
-      let remainingTime = calculateRemainingTime(barberSession, activeBarberAppointments);
-      if (remainingTime < totalServiceTime) {
-          return sendResponse(res, false, 'Not enough remaining time for this appointment', null, 400);
-      }
-
-      const { totalWaitTime, numberOfUsersInQueue } = await getEstimatedWaitTimeForBarber(barber_id);
-      
-      appointmentData = {
-        ...appointmentData,
-        status: AppointmentENUM.Checked_in,
-        estimated_wait_time: totalWaitTime,
-        queue_position: numberOfUsersInQueue + 1,
-        check_in_time: new Date(),
-    };
-
-        // Update barber session remaining time
-        await barberSession.update({ 
-            remaining_time: remainingTime - totalServiceTime 
-        });
-
-    } else {
-
-        // Appointment-based logic (category 1)
-        if (!slot_id) {
-            return sendResponse(res, false, 'Slot ID is required for appointments', null, 400);
-        }
-
-        // Get the selected slot
-        const slot = await db.Slot.findOne({
-            where: { 
-                id: slot_id,
-                is_booked: false
-            }
-        });
-
-        if (!slot) {
-            return sendResponse(res, false, 'Selected slot is not available', null, 400);
-        }
-
-        // Calculate end time based on services duration
-        const startTime = new Date(`${slot.slot_date} ${slot.start_time}`);
-        const endTime = new Date(startTime.getTime() + totalServiceTime * 60000);
-
-        // Verify if enough consecutive slots are available
-        const requiredSlots = await verifyConsecutiveSlots(
-            slot.BarberSessionId, 
-            slot.slot_date, 
-            slot.start_time, 
-            totalServiceTime
-        );
-
-        if (!requiredSlots) {
-            return sendResponse(res, false, 'Not enough consecutive slots available', null, 400);
-        }
-
-        appointmentData = {
-            ...appointmentData,
-            status: AppointmentENUM.Appointment,
-            SlotId: slot_id,
-            appointment_date: slot.slot_date,
-            appointment_start_time: slot.start_time,
-            appointment_end_time: endTime.toTimeString().split(' ')[0],
+            SalonId: salon_id,
+            number_of_people: number_of_people ?? 1,
+            name: name,
+            mobile_number: mobile_number,
         };
 
-        // Mark slots as booked
-        await markSlotsAsBooked(requiredSlots);
-    }
+        if(barber.category === BarberCategoryENUM.ForWalkIn) {
+            // Walk-in logic
+            const today = new Date();
+            const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0);
+            const todayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999);
 
-    // Create appointment
-   const appointment = await Appointment.create(appointmentData);
-   
-       // Ensure service_ids contains only valid and selected services
-        if (service_ids && Array.isArray(service_ids) && service_ids.length > 0) {
-            // Fetch valid services from the database
-            const validServices = await Service.findAll({ 
-                where: { id: service_ids } 
-            });
-
-            const validServiceIds = validServices.map(service => service.id);
-            const invalidServiceIds = service_ids.filter(id => !validServiceIds.includes(id));
-
-            // Check if all unique service_ids are valid
-            if (invalidServiceIds.length > 0) {
-                return sendResponse(res, false, 'Some selected services are invalid or duplicate', null, 400);
-            }
-
-            // Attach only the selected and valid services// Add services, including duplicates
-            for (const serviceId of service_ids) {
-                if (validServiceIds.includes(serviceId)) {
-                    //await appointment.addService(serviceId); // Pass only the service ID
-                    await AppointmentService.create({
-                        AppointmentId: appointment.id,
-                        ServiceId: serviceId
+                // Check if the user already has an active appointment
+                const activeAppointment = await Appointment.findOne({
+                    where: { UserId: user_id, status: [AppointmentENUM.Checked_in, AppointmentENUM.In_salon] }
+                });
+                if (activeAppointment) {
+                    return res.status(400).send({
+                    success: false,
+                    message: "You already have an active appointment. Please complete or cancel it before booking a new one.",
+                    data: null,
+                    code: 400,
                     });
                 }
-            }
+
+            // Retrieve the barber session
+            const barberSession = await BarberSession.findOne({
+                where: {
+                BarberId: barber_id,
+                session_date: { [Op.between]: [todayStart, todayEnd] }
+                },
+                attributes: ['id', 'start_time', 'end_time', 'session_date', 'remaining_time']
+            });
+        
+        if (!barberSession) {
+            return sendResponse(res, false, 'Barber is not available for appointments today', null, 400);
+        }
+    
+        // Check for existing appointments for the barber
+        const activeBarberAppointments = await Appointment.findAll({
+            where: {
+            BarberId: barber_id,
+            status: [AppointmentENUM.Checked_in, AppointmentENUM.In_salon]
+            },
+        });
+
+        let remainingTime = calculateRemainingTime(barberSession, activeBarberAppointments);
+        if (remainingTime < totalServiceTime) {
+            return sendResponse(res, false, 'Not enough remaining time for this appointment', null, 400);
         }
 
+        const { totalWaitTime, numberOfUsersInQueue } = await getEstimatedWaitTimeForBarber(barber_id);
+        
+        appointmentData = {
+            ...appointmentData,
+            status: AppointmentENUM.Checked_in,
+            estimated_wait_time: totalWaitTime,
+            queue_position: numberOfUsersInQueue + 1,
+            check_in_time: new Date(),
+        };
 
-    // Get updated appointment with services
-    let appointmentWithServices = await Appointment.findOne({
-        where: { id: appointment.id },
-        include: [ {
-            model: Salon,
-            as: 'salon',
-            attributes: { exclude: ['createdAt', 'updatedAt'] },
-        },{
-            model: Service,
-            attributes: ['id', 'name', 'default_service_time'],
-            through: { attributes: [] },
-        }],
-    });
+            // Update barber session remaining time
+            await barberSession.update({ 
+                remaining_time: remainingTime - totalServiceTime 
+            });
 
-    if (appointmentWithServices) {
-        // Manually fetch associated services
-        const appointmentServices = await AppointmentService.findAll({
-            where: {
-                AppointmentId: appointmentWithServices.id
+        } else {
+
+            // Appointment-based logic (category 1)
+            if (!slot_id) {
+                return sendResponse(res, false, 'Slot ID is required for appointments', null, 400);
             }
-        });
-        const serviceIds = appointmentServices.map(as => as.ServiceId);
-        // Get all service IDs
-        const servicesMap = await Service.findAll({
-            where: {
-                id: serviceIds
-            },
-            attributes: ['id', 'name', 'min_price', 'max_price', 'default_service_time']
-        }).then(services => {
-            // Create a map of services by ID for quick lookup
-            return services.reduce((map, service) => {
-                map[service.id] = service;
-                return map;
-            }, {});
-        });
 
-        // Map back to maintain order and duplicates
-        const services = appointmentServices.map(as => servicesMap[as.ServiceId]);
+            // Get the selected slot
+            const slot = await db.Slot.findOne({
+                where: { 
+                    id: slot_id,
+                    is_booked: false
+                }
+            });
+
+            if (!slot) {
+                return sendResponse(res, false, 'Selected slot is not available', null, 400);
+            }
+
+            // Calculate end time based on services duration
+            const startTime = new Date(`${slot.slot_date} ${slot.start_time}`);
+            const endTime = new Date(startTime.getTime() + totalServiceTime * 60000);
+
+            // Verify if enough consecutive slots are available
+            const requiredSlots = await verifyConsecutiveSlots(
+                slot.BarberSessionId, 
+                slot.slot_date, 
+                slot.start_time, 
+                totalServiceTime
+            );
+
+            if (!requiredSlots) {
+                return sendResponse(res, false, 'Not enough consecutive slots available', null, 400);
+            }
+
+            appointmentData = {
+                ...appointmentData,
+                status: AppointmentENUM.Appointment,
+                SlotId: slot_id,
+                appointment_date: slot.slot_date,
+                appointment_start_time: slot.start_time,
+                appointment_end_time: endTime.toTimeString().split(' ')[0],
+            };
+
+            // Mark slots as booked
+            await markSlotsAsBooked(requiredSlots);
+        }
+
+        if (payment_mode === PaymentMethodENUM.Pay_In_Person) {
+            // For pay in person, create appointment with pending status
+            appointmentData = {
+                ...appointmentData,
+                status: 'Pending',
+                paymentStatus: 'Pending'
+            };
+            // Create appointment
+            const appointment = await Appointment.create(appointmentData);
+
+            // Create payment record
+            await Payment.create({
+                appointmentId: appointment.id,
+                userId: user_id,
+                amount: totalServiceCost,
+                tax: tax,
+                tip: validatedTip,
+                totalAmount: totalAmount,
+                paymentStatus: 'Pending',
+                paymentMethod: PaymentMethodENUM.Pay_In_Person,
+            });
+            
+            // Ensure service_ids contains only valid and selected services
+            if (service_ids && Array.isArray(service_ids) && service_ids.length > 0) {
+                // Fetch valid services from the database
+                const validServices = await Service.findAll({ 
+                    where: { id: service_ids } 
+                });
+
+                const validServiceIds = validServices.map(service => service.id);
+                const invalidServiceIds = service_ids.filter(id => !validServiceIds.includes(id));
+
+                // Check if all unique service_ids are valid
+                if (invalidServiceIds.length > 0) {
+                    return sendResponse(res, false, 'Some selected services are invalid or duplicate', null, 400);
+                }
+
+                // Attach only the selected and valid services// Add services, including duplicates
+                for (const serviceId of service_ids) {
+                    if (validServiceIds.includes(serviceId)) {
+                        //await appointment.addService(serviceId); // Pass only the service ID
+                        await AppointmentService.create({
+                            AppointmentId: appointment.id,
+                            ServiceId: serviceId
+                        });
+                    }
+                }
+            }
+
+
+            // Get updated appointment with services
+            let appointmentWithServices = await Appointment.findOne({
+                where: { id: appointment.id },
+                include: [ {
+                    model: Salon,
+                    as: 'salon',
+                    attributes: { exclude: ['createdAt', 'updatedAt'] },
+                },{
+                    model: Service,
+                    attributes: ['id', 'name', 'default_service_time'],
+                    through: { attributes: [] },
+                }],
+            });
+
+            if (appointmentWithServices) {
+                // Manually fetch associated services
+                const appointmentServices = await AppointmentService.findAll({
+                    where: {
+                        AppointmentId: appointmentWithServices.id
+                    }
+                });
+                const serviceIds = appointmentServices.map(as => as.ServiceId);
+                // Get all service IDs
+                const servicesMap = await Service.findAll({
+                    where: {
+                        id: serviceIds
+                    },
+                    attributes: ['id', 'name', 'min_price', 'max_price', 'default_service_time']
+                }).then(services => {
+                    // Create a map of services by ID for quick lookup
+                    return services.reduce((map, service) => {
+                        map[service.id] = service;
+                        return map;
+                    }, {});
+                });
+
+                // Map back to maintain order and duplicates
+                const services = appointmentServices.map(as => servicesMap[as.ServiceId]);
+            
+                // Add services to appointment object
+                appointmentWithServices.dataValues.Services = services;
+            }
+
+            if(barber.category === BarberCategoryENUM.ForWalkIn) {
+                const updatedAppointments = await getAppointmentsByRole(false);
+                if(updatedAppointments)
+                broadcastBoardUpdates(updatedAppointments);
+            }
+
+            // Send notifications
+            await sendAppointmentNotifications(appointment, name, mobile_number, user_id, salon_id);
+
+            const salon = await db.Salon.findOne({ where: { id: salon_id } });
+            const salonName = salon ? salon.name : 'the selected salon';
+            const salonAddress = salon ? salon.address : 'the selected salon';
+
+            // Add this before sending the confirmation email
+            const user = await db.USER.findOne({ where: { id: user_id }, attributes: ['email'] });
+            if (!user) {
+                return sendResponse(res, false, 'User not found', null, 404);
+            }
+            const email = user.email; // Fetch the user's email
+            // Extract services list
+            const serviceNames = appointmentWithServices.Services.map(service => service.name).join(', ');
+
+            const formatTo12Hour = (time) => {
+                const [hours, minutes, seconds] = time.split(":").map(Number);
+                const date = new Date(1970, 0, 1, hours, minutes, seconds); // Create a valid Date object
+            
+                return date.toLocaleString("en-US", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    second: "2-digit",
+                    hour12: true
+                });
+            };
+
+        
+            let emailData;
+            if (barber.category === BarberCategoryENUM.ForWalkIn) {
+                emailData = {
+                    is_walk_in: true,
+                    customer_name: appointment.name,
+                    barber_name: barber.name,
+                    appointment_date: new Date().toLocaleString('en-US', { 
+                        weekday: 'short',
+                        year: 'numeric',
+                        month: 'short',
+                        day: 'numeric'
+                    }),
+                    salon_name: salonName,
+                    location: salonAddress,
+                    services: serviceNames, // Add services list
+                    email_subject: "Walk-in Appointment Confirmation",
+                    cancel_url: `${process.env.FRONTEND_URL}/appointment_confirmation/${appointment.id}`
+                };
+            } else {
+                emailData = {
+                    is_walk_in: false,
+                    customer_name: appointment.name,
+                    barber_name: barber.name,
+                    appointment_date: new Date(appointment.appointment_date).toLocaleDateString('en-US', {
+                        weekday: 'short',
+                        year: 'numeric',
+                        month: 'short',
+                        day: 'numeric'
+                    }),
+                    appointment_start_time: formatTo12Hour(appointment.appointment_start_time),  // Convert here
+                    appointment_end_time: formatTo12Hour(appointment.appointment_end_time),      // Convert here
+                    salon_name: salonName,
+                    location: salonAddress,
+                    services: serviceNames, // Add services list
+                    email_subject: "Appointment Confirmation",
+                    cancel_url: `${process.env.FRONTEND_URL}/appointment_confirmation/${appointment.id}`
+                };
+            }
+
+            console.log("Email data:", emailData);
     
-        // Add services to appointment object
-        appointmentWithServices.dataValues.Services = services;
-    }
+            // Send confirmation email
+            await sendEmail(email,"Your Appointment Book Successfully",INVITE_BOOKING_APPOINTMENT_TEMPLATE_ID, emailData );
 
-    if(barber.category === BarberCategoryENUM.ForWalkIn) {
-        const updatedAppointments = await getAppointmentsByRole(false);
-        if(updatedAppointments)
-        broadcastBoardUpdates(updatedAppointments);
-    }
+            return sendResponse(res, true, 'Appointment created successfully', appointmentWithServices, 201);
 
-     // Send notifications
-     await sendAppointmentNotifications(appointment, name, mobile_number, user_id, salon_id);
+        } else if (payment_mode === PaymentMethodENUM.Pay_Online) {
+            // Redirect to the new payment API
+            const paymentRequest = {
+                totalAmount,
+                appointmentData,
+                user_id,
+                validatedTip,
+            };
 
-    const salon = await db.Salon.findOne({ where: { id: salon_id } });
-     const salonName = salon ? salon.name : 'the selected salon';
-     const salonAddress = salon ? salon.address : 'the selected salon';
-
-    // Add this before sending the confirmation email
-    const user = await db.USER.findOne({ where: { id: user_id }, attributes: ['email'] });
-    if (!user) {
-        return sendResponse(res, false, 'User not found', null, 404);
-    }
-    const email = user.email; // Fetch the user's email
-    // Extract services list
-    const serviceNames = appointmentWithServices.Services.map(service => service.name).join(', ');
-
-    const formatTo12Hour = (time) => {
-        const [hours, minutes, seconds] = time.split(":").map(Number);
-        const date = new Date(1970, 0, 1, hours, minutes, seconds); // Create a valid Date object
-    
-        return date.toLocaleString("en-US", {
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit",
-            hour12: true
-        });
-    };
-
-    
-    let emailData;
-    if (barber.category === BarberCategoryENUM.ForWalkIn) {
-        emailData = {
-            is_walk_in: true,
-            customer_name: appointment.name,
-            barber_name: barber.name,
-            appointment_date: new Date().toLocaleString('en-US', { 
-                weekday: 'short',
-                year: 'numeric',
-                month: 'short',
-                day: 'numeric'
-            }),
-            salon_name: salonName,
-            location: salonAddress,
-            services: serviceNames, // Add services list
-            email_subject: "Walk-in Appointment Confirmation",
-            cancel_url: `${process.env.FRONTEND_URL}/appointment_confirmation/${appointment.id}`
-        };
-    } else {
-        emailData = {
-            is_walk_in: false,
-            customer_name: appointment.name,
-            barber_name: barber.name,
-            appointment_date: new Date(appointment.appointment_date).toLocaleDateString('en-US', {
-                weekday: 'short',
-                year: 'numeric',
-                month: 'short',
-                day: 'numeric'
-            }),
-            appointment_start_time: formatTo12Hour(appointment.appointment_start_time),  // Convert here
-            appointment_end_time: formatTo12Hour(appointment.appointment_end_time),      // Convert here
-            salon_name: salonName,
-            location: salonAddress,
-            services: serviceNames, // Add services list
-            email_subject: "Appointment Confirmation",
-            cancel_url: `${process.env.FRONTEND_URL}/appointment_confirmation/${appointment.id}`
-        };
-    }
-
-    console.log("Email data:", emailData);
-  
-      // Send confirmation email
-      await sendEmail(email,"Your Appointment Book Successfully",INVITE_BOOKING_APPOINTMENT_TEMPLATE_ID, emailData );
-
-    return sendResponse(res, true, 'Appointment created successfully', appointmentWithServices, 201);
+            // Call the new payment API
+            return createPayment({ body: paymentRequest }, res);
+        } else {
+            return sendResponse(res, false, 'Invalid payment method', null, 400);
+        }
     } catch (error) {
     console.error("Error creating appointment:", error);
     return sendResponse(res, false, error.message || 'Internal Server Error', null, 500);
