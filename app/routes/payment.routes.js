@@ -7,93 +7,141 @@ module.exports = (app) => {
   const apiPrefix = "/api/payment";
 
   /**
- * @swagger
- * /api/payment/create:
- *   post:
- *     summary: Create a new payment intent
- *     description: Initiates a Stripe payment intent for online payments
- *     tags:
- *       - Payments
- *     security:
- *       - BearerAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - totalAmount
- *               - appointmentData
- *               - user_id
- *             properties:
- *               totalAmount:
- *                 type: number
- *                 description: Total payment amount including tax and tip
- *                 example: 123.45
- *               appointmentData:
- *                 type: object
- *                 description: Appointment details
- *                 properties:
- *                   UserId:
- *                     type: integer
- *                     example: 1
- *                   BarberId:
- *                     type: integer
- *                     example: 2
- *                   SalonId:
- *                     type: integer
- *                     example: 1
- *                   status:
- *                     type: string
- *                     example: "Pending"
- *                   # Add other appointment properties as needed
- *               user_id:
- *                 type: integer
- *                 description: ID of the user making the payment
- *                 example: 1
- *               validatedTip:
- *                 type: number
- *                 description: Optional validated tip amount
- *                 example: 10.00
- *     responses:
- *       200:
- *         description: Payment intent created successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 message:
- *                   type: string
- *                   example: "Payment initiated. Complete payment to confirm."
- *                 data:
- *                   type: object
- *                   properties:
- *                     paymentIntent:
- *                       type: object
- *                       properties:
- *                         id:
- *                           type: string
- *                           example: "pi_1234567890"
- *                         client_secret:
- *                           type: string
- *                           example: "pi_1234567890_secret_1234567890"
- *                         amount:
- *                           type: integer
- *                           example: 12345
- *                         currency:
- *                           type: string
- *                           example: "usd"
- *       400:
- *         description: Missing required fields
- *       500:
- *         description: Internal server error
- */
-  app.post(`${apiPrefix}/create`,  paymentController.createPayment);
+   * @swagger
+   * /api/payment/create:
+   *   post:
+   *     summary: Create a new payment intent
+   *     description: Initiates a Stripe payment intent for online payments
+   *     tags:
+   *       - Payments
+   *     security:
+   *       - BearerAuth: []
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required:
+   *               - totalAmount
+   *               - appointmentData
+   *               - user_id
+   *               - validatedTip
+   *             properties:
+   *               totalAmount:
+   *                 type: number
+   *                 description: Total payment amount
+   *                 example: 13.8
+   *               appointmentData:
+   *                 type: object
+   *                 description: Appointment details
+   *                 required:
+   *                   - UserId
+   *                   - BarberId
+   *                   - SalonId
+   *                   - status
+   *                 properties:
+   *                   UserId:
+   *                     type: integer
+   *                     example: 359
+   *                   BarberId:
+   *                     type: integer
+   *                     example: 151
+   *                   SalonId:
+   *                     type: integer
+   *                     example: 12
+   *                   status:
+   *                     type: string
+   *                     example: "Pending"
+   *               user_id:
+   *                 type: integer
+   *                 description: ID of the user making the payment
+   *                 example: 359
+   *               validatedTip:
+   *                 type: number
+   *                 description: Validated tip amount
+   *                 example: 2.5
+   *     responses:
+   *       200:
+   *         description: Payment intent created successfully
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: true
+   *                 message:
+   *                   type: string
+   *                   example: "Payment initiated successfully"
+   *                 data:
+   *                   type: object
+   *                   properties:
+   *                     paymentIntent:
+   *                       type: object
+   *                       properties:
+   *                         id:
+   *                           type: string
+   *                           example: "pi_1234567890"
+   *                         client_secret:
+   *                           type: string
+   *                           example: "pi_1234567890_secret_1234567890"
+   *                         amount:
+   *                           type: integer
+   *                           example: 1630
+   *                         currency:
+   *                           type: string
+   *                           example: "usd"
+   *                         metadata:
+   *                           type: object
+   *                           properties:
+   *                             user_id:
+   *                               type: string
+   *                               example: "359"
+   *                             appointment_id:
+   *                               type: string
+   *                               example: "359"
+   *                             barber_id:
+   *                               type: string
+   *                               example: "151"
+   *                             salon_id:
+   *                               type: string
+   *                               example: "12"
+   *                             tip_amount:
+   *                               type: string
+   *                               example: "2.5"
+   *                             appointment_status:
+   *                               type: string
+   *                               example: "Pending"
+   *       400:
+   *         description: Bad request - Missing or invalid required fields
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: false
+   *                 message:
+   *                   type: string
+   *                   example: "Failed to create payment intent"
+   *       500:
+   *         description: Internal server error
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: false
+   *                 message:
+   *                   type: string
+   *                   example: "Failed to create payment intent"
+   */
+  app.post(`${apiPrefix}/create`, paymentController.createPayment);
 
   /**
    * @swagger

@@ -6,55 +6,43 @@ const { Payment, Appointment } = require('../models'); // Adjust path as needed
 
 
 
-
-
-async function createPaymentIntent({ totalAmount, appointmentData, user_id, validatedTip }) {
-    const totalAmountCents = Math.round(totalAmount * 100);
-
-    const paymentIntent = await stripe.paymentIntents.create({
-        amount: totalAmountCents,
-        currency: 'usd',
-        metadata: {
-            userId: user_id.toString(),
-            tip: validatedTip.toString(),
-            appointmentData: JSON.stringify(appointmentData),
-        },
-    });
-
-    console.log("Payment intent created:", paymentIntent);
-
-    return paymentIntent;
-}
-
 // API to handle payment creation
-exports.createPayment = async (paymentData, res) => {
+exports.createPayment = async (req, res) => {
     try {
-        const { totalAmount, appointmentData, user_id, validatedTip } = paymentData;
-
-        // Validate required fields
-        if (!totalAmount || !appointmentData || !user_id) {
-            return sendResponse(res, false, 'Missing required fields', null, 400);
-        }
-
-        // Generate payment intent
-        const paymentIntent = await createPaymentIntent({
-            totalAmount,
-            appointmentData: {
-                ...appointmentData,
-                Services: service_ids // Ensure services are included
-            },
-            user_id,
-            validatedTip
+        const { totalAmount, appointmentData, user_id, validatedTip } = req.body;
+        
+        // Convert amount to cents (Stripe expects amounts in smallest currency unit)
+        const amountInCents = Math.round((totalAmount + validatedTip) * 100);
+        
+        // Create a Payment Intent
+        const paymentIntent = await stripe.paymentIntents.create({
+          amount: amountInCents,
+          currency: 'usd',
+          metadata: {
+            user_id: user_id.toString(),
+            appointment_id: appointmentData.UserId.toString(),
+            barber_id: appointmentData.BarberId.toString(),
+            salon_id: appointmentData.SalonId.toString(),
+            tip_amount: validatedTip.toString(),
+            appointment_status: appointmentData.status
+          },
+          automatic_payment_methods: {
+            enabled: true,
+          },
         });
-
+    
+        // Return the client secret and payment intent ID
         return sendResponse(res, true, 'Payment initiated successfully', {
             paymentIntent
         }, 200);
 
-    } catch (error) {
-        console.error("Error creating payment:", error);
-        return sendResponse(res, false, error.message || 'Internal Server Error', null, 500);
-    }
+      } catch (error) {
+        console.error('Error creating payment intent:', error);
+        res.status(500).json({ 
+          error: 'Failed to create payment intent',
+          message: error.message 
+        });
+      }
 };
 
 exports.testWebhook = async (req, res) => {

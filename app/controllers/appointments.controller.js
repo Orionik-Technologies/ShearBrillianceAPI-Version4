@@ -607,21 +607,6 @@ exports.create = async (req, res) => {
 
             return sendResponse(res, true, 'Appointment created successfully', appointmentWithServices, 201);
 
-        } else if (payment_mode === PaymentMethodENUM.Pay_Online) {
-            const paymentData = {
-                totalAmount,
-                appointmentData: {
-                    ...appointmentData,
-                    paymentMode: payment_mode,
-                },
-                user_id,
-                validatedTip
-            };
-
-            // Call createPayment with the structured data and response object
-            return await createPayment(paymentData, res);
-        } else {
-            return sendResponse(res, false, 'Invalid payment method', null, 400);
         }
     } catch (error) {
     console.error("Error creating appointment:", error);
