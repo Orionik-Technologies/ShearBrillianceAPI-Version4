@@ -3,6 +3,7 @@ const { end } = require('pdfkit');
 const sendResponse = require('../helpers/responseHelper'); // Import the helper function
 const db = require("../models");
 const { Payment, Appointment } = require('../models'); // Adjust path as needed
+const PaymentMethodENUM = require('../config/paymentEnums.config');
 
 
 
@@ -74,6 +75,8 @@ exports.handleWebhook = async (req, res) => {
         return res.status(400).send(`Webhook Error: ${err.message}`);
     }
 
+    // const event = req.body;
+
     // Handle the event
     switch (event.type) {
         case 'payment_intent.succeeded': {
@@ -87,22 +90,26 @@ exports.handleWebhook = async (req, res) => {
             const totalAmount = paymentIntent.amount / 100; // Convert cents to dollars
             const currency = paymentIntent.currency.toUpperCase();
 
+            console.log('Extracted metadata:', {
+                userId,
+                appointmentData,
+                tip,
+                totalAmount,
+                currency,
+            });
+
             try {
                 // Create an Appointment record in the database
                 const appointment = await Appointment.create({
-                    UserId: userId,
-                    BarberId: appointmentData.BarberId,
-                    SalonId: appointmentData.SalonId,
-                    SlotId: appointmentData.SlotId,
-                    number_of_people: appointmentData.number_of_people,
-                    status: 'appointment', // Default status for a new appointment
-                    appointment_date: appointmentData.appointment_date,
-                    appointment_start_time: appointmentData.appointment_start_time,
-                    appointment_end_time: appointmentData.appointment_end_time,
-                    paymentStatus: 'Success', // Mark as paid
-                    paymentMode: 'Pay_Online', // Since this is an online payment
+                    ...appointmentData, // Spread the appointmentData object
+                    number_of_people: appointmentData.number_of_people || 1, // Default to 1 if not provided
+                    paymentMode: appointmentData.paymentMode || 'Pay_Online', // Default to 'Pay_Online' if not provided
+                    status: 'appointment', // Default status
+                    paymentStatus: 'Success', // Mark payment as successful
                     stripePaymentIntentId: paymentIntent.id, // Store the Stripe PaymentIntent ID
                 });
+
+                console.log('Appointment record created successfully:', appointment);   
 
                 // Create a Payment record in the database
                 const payment = await Payment.create({
@@ -134,10 +141,14 @@ exports.handleWebhook = async (req, res) => {
                     payment,
                 });
 
-                // Send a success response
-                res.status(200).json({ success: true, message: 'Appointment and Payment created successfully' });
-            } catch (dbError) {
-                console.error('Error saving Appointment or Payment to the database:', dbError);
+                // Send a success response to the client
+                return sendResponse(res, true, 'Appointment and Payment created successfully', {
+                    appointment,
+                    payment,
+                }, 200);
+
+            } catch (error) {
+                console.error('Error saving Appointment or Payment to the database:', error.message);
                 return res.status(500).send('Database Error: Failed to save Appointment or Payment');
             }
 
