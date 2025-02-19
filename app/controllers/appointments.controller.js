@@ -446,7 +446,7 @@ exports.create = async (req, res) => {
             // Create payment record
             await Payment.create({
                 appointmentId: appointment.id,
-                userId: user_id,
+                UserId: user_id,
                 amount: totalServiceCost,
                 tax: tax,
                 tip: validatedTip,

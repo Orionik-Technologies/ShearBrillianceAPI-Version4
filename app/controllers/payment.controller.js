@@ -21,13 +21,15 @@ async function createPaymentIntent({ totalAmount, appointmentData, user_id, vali
         },
     });
 
+    console.log("Payment intent created:", paymentIntent);
+
     return paymentIntent;
 }
 
 // API to handle payment creation
 exports.createPayment = async (paymentData, res) => {
     try {
-        const { totalAmount, appointmentData, user_id, validatedTip, service_ids } = paymentData;
+        const { totalAmount, appointmentData, user_id, validatedTip } = paymentData;
 
         // Validate required fields
         if (!totalAmount || !appointmentData || !user_id) {
@@ -108,7 +110,7 @@ async function handlePaymentSuccess(paymentIntent) {
         try {
             const payment = await Payment.create({
                 appointmentId: appointment.id,
-                userId: userId,
+                UserId: userId,
                 amount: serviceTotal,
                 tax: tax,
                 tip: tip || 0,
