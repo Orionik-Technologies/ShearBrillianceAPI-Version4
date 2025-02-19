@@ -14,7 +14,7 @@ module.exports = (sequelize, Sequelize) => {
             },
             onDelete: "CASCADE"
         },
-        userId: {
+        UserId: {
             type: Sequelize.INTEGER,
             allowNull: false,
             references: {
