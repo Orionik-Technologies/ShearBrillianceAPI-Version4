@@ -1,5 +1,4 @@
 const express = require("express");
-const router = express.Router();
 const paymentController = require("../controllers/payment.controller");
 const { authenticateJWT } = require('../middleware/auth.middleware'); // Assuming JWT authentication middleware
 
@@ -50,9 +49,55 @@ module.exports = (app) => {
    *                   SalonId:
    *                     type: integer
    *                     example: 12
+   *                   SlotId:
+   *                     type: integer
+   *                     example: 45
+   *                   number_of_people:
+   *                     type: integer
+   *                     example: 2
    *                   status:
    *                     type: string
    *                     example: "Pending"
+   *                   appointment_date:
+   *                     type: string
+   *                     format: date
+   *                     example: "2025-02-20"
+   *                   appointment_start_time:
+   *                     type: string
+   *                     example: "10:00 AM"
+   *                   appointment_end_time:
+   *                     type: string
+   *                     example: "11:00 AM"
+   *                   tax:
+   *                     type: number
+   *                     example: 1.8
+   *                   discount:
+   *                     type: number
+   *                     example: 0
+   *                   deviceId:
+   *                     type: string
+   *                     example: "abc123"
+   *                   deviceType:
+   *                     type: string
+   *                     example: "iOS"
+   *                   deviceModel:
+   *                     type: string
+   *                     example: "iPhone 14"
+   *                   osVersion:
+   *                     type: string
+   *                     example: "16.3"
+   *                   ipAddress:
+   *                     type: string
+   *                     example: "192.168.1.1"
+   *                   userAgent:
+   *                     type: string
+   *                     example: "Mozilla/5.0"
+   *                   location:
+   *                     type: string
+   *                     example: "New York, USA"
+   *                   notes:
+   *                     type: string
+   *                     example: "Customer prefers a quiet environment"
    *               user_id:
    *                 type: integer
    *                 description: ID of the user making the payment
@@ -141,6 +186,7 @@ module.exports = (app) => {
    *                   type: string
    *                   example: "Failed to create payment intent"
    */
+
   app.post(`${apiPrefix}/create`, paymentController.createPayment);
 
   /**
@@ -156,6 +202,7 @@ module.exports = (app) => {
    *         type: string
    *         required: true
    *         description: Stripe signature for webhook verification
+   *         example: "t=123456789,v1=abcdef123456,v0=abcdef789012"
    *     requestBody:
    *       required: true
    *       content:
@@ -221,116 +268,17 @@ module.exports = (app) => {
    *                 error:
    *                   type: string
    *                   example: "Webhook Error: Invalid signature"
-   *     x-codeSamples:
-   *       - lang: JavaScript
-   *         source: |
-   *           // Success case creates/updates:
-   *           // 1. Appointment record with status 'Success'
-   *           // 2. Payment record with calculated amounts:
-   *           //    - Total amount (converted from cents)
-   *           //    - Tax (13%)
-   *           //    - Service total
-   *           //    - Tip from metadata
-   *           
-   *           // Failure case updates:
-   *           // 1. Payment record with status 'Failed'
-   *           // 2. Includes failure reason from payment intent
-   * 
-   * components:
-   *   schemas:
-   *     PaymentRecord:
-   *       type: object
-   *       properties:
-   *         appointmentId:
-   *           type: integer
-   *           description: ID of the associated appointment
-   *         userId:
-   *           type: integer
-   *           description: ID of the user making the payment
-   *         amount:
-   *           type: number
-   *           description: Service total (before tax and tip)
-   *         tax:
-   *           type: number
-   *           description: Tax amount (13% of service total)
-   *         tip:
-   *           type: number
-   *           description: Tip amount
-   *         totalAmount:
-   *           type: number
-   *           description: Total amount (service total + tax + tip)
-   *         currency:
-   *           type: string
-   *           description: Payment currency (uppercase)
-   *         paymentStatus:
-   *           type: string
-   *           enum: [Success, Failed]
-   *           description: Status of the payment
-   *         paymentMethod:
-   *           type: string
-   *           enum: [Credit_Card]
-   *           description: Method of payment
-   *         paymentIntentId:
-   *           type: string
-   *           description: Stripe payment intent ID
-   *         failureReason:
-   *           type: string
-   *           description: Reason for payment failure (if applicable)
-   */
-  app.post(`${apiPrefix}/webhook`, express.raw({ type: 'application/json' }), paymentController.handleWebhook);
-
-  /**
-   * @swagger
-   * paths:
-   *   /api/payment/testwebhook:
-   *     post:
-   *       summary: Simulate Stripe Webhook
-   *       description: Simulates a Stripe webhook event for testing purposes.
-   *       tags:
-   *         - Payments
-   *       requestBody:
-   *         required: true
+   *       500:
+   *         description: Internal server error
    *         content:
    *           application/json:
    *             schema:
    *               type: object
    *               properties:
-   *                 id:
+   *                 error:
    *                   type: string
-   *                   example: evt_12345
-   *                 type:
-   *                   type: string
-   *                   example: payment_intent.succeeded
-   *                 data:
-   *                   type: object
-   *                   properties:
-   *                     object:
-   *                       type: object
-   *                       example:
-   *                         id: "pi_12345"
-   *                         amount: 5000
-   *                         currency: "usd"
-   *                         metadata:
-   *                           userId: "123"
-   *                           tip: "5"
-   *                           appointmentData: '{"id":1,"name":"John Doe"}'
-   *       responses:
-   *         200:
-   *           description: Webhook processed successfully
-   *           content:
-   *             application/json:
-   *               schema:
-   *                 type: object
-   *                 properties:
-   *                   received:
-   *                     type: boolean
-   *                     example: true
-   *         400:
-   *           description: Webhook Error
+   *                   example: "Database Error: Failed to save Appointment or Payment"
    */
-  app.post(`${apiPrefix}/testwebhook`, express.raw({ type: 'application/json' }), paymentController.testWebhook);
 
-
-
-  
+  app.post(`${apiPrefix}/webhook`, express.raw({ type: 'application/json' }), paymentController.handleWebhook);
 };

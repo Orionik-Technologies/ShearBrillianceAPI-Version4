@@ -1,7 +1,7 @@
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const { end } = require('pdfkit');
 const sendResponse = require('../helpers/responseHelper'); // Import the helper function
 const db = require("../models");
-const { PaymentMethodENUM } = require('../config/paymentEnums.config');
 const { Payment, Appointment } = require('../models'); // Adjust path as needed
 
 
@@ -10,165 +10,155 @@ const { Payment, Appointment } = require('../models'); // Adjust path as needed
 exports.createPayment = async (req, res) => {
     try {
         const { totalAmount, appointmentData, user_id, validatedTip } = req.body;
-        
-        // Convert amount to cents (Stripe expects amounts in smallest currency unit)
+
+        // Log appointmentData to debug
+        console.log('Appointment Data:', appointmentData);
+
+        // Convert amount to cents (Stripe expects amounts in the smallest currency unit)
         const amountInCents = Math.round((totalAmount + validatedTip) * 100);
-        
+
+        // Serialize appointmentData into a JSON string
+        const serializedAppointmentData = JSON.stringify(appointmentData);
+
         // Create a Payment Intent
         const paymentIntent = await stripe.paymentIntents.create({
-          amount: amountInCents,
-          currency: 'usd',
-          metadata: {
-            user_id: user_id.toString(),
-            appointment_id: appointmentData.UserId.toString(),
-            barber_id: appointmentData.BarberId.toString(),
-            salon_id: appointmentData.SalonId.toString(),
-            tip_amount: validatedTip.toString(),
-            appointment_status: appointmentData.status
-          },
-          automatic_payment_methods: {
-            enabled: true,
-          },
+            amount: amountInCents,
+            currency: 'usd',
+            metadata: {
+                user_id: user_id.toString(),
+                appointmentData: serializedAppointmentData, // Pass serialized data
+                tip: validatedTip.toString(),
+            },
+            automatic_payment_methods: {
+                enabled: true,
+            },
         });
-    
+
         // Return the client secret and payment intent ID
         return sendResponse(res, true, 'Payment initiated successfully', {
-            paymentIntent
+            paymentIntent,
         }, 200);
 
-      } catch (error) {
+    } catch (error) {
         console.error('Error creating payment intent:', error);
-        res.status(500).json({ 
-          error: 'Failed to create payment intent',
-          message: error.message 
+        res.status(500).json({
+            error: 'Failed to create payment intent',
+            message: error.message,
         });
-      }
-};
-
-exports.testWebhook = async (req, res) => {
-    try {
-        const event = req.body; // Directly use the request body for testing
-
-        // Handle different event types
-        switch (event.type) {
-            case 'payment_intent.succeeded':
-                await handlePaymentSuccess(event.data.object);
-                break;
-
-            case 'payment_intent.payment_failed':
-                await handlePaymentFailure(event.data.object);
-                break;
-
-            default:
-                console.log(`Unhandled event type: ${event.type}`);
-        }
-
-        // Respond to acknowledge receipt of the event
-        res.json({ received: true });
-    } catch (err) {
-        console.error('Error processing webhook:', err.message);
-        res.status(400).send(`Webhook Error: ${err.message}`);
     }
 };
 
 
-// Helper function to handle successful payments
-async function handlePaymentSuccess(paymentIntent) {
-    try {
-        // Extract metadata from the payment intent
-        const { appointmentData, userId, tip } = paymentIntent.metadata;
-
-        // Parse appointment data from metadata
-        const parsedAppointmentData = JSON.parse(appointmentData);
-
-        // Directly create the appointment
-        const appointment = await Appointment.create({
-            ...parsedAppointmentData,
-            paymentStatus: 'Success', // Mark payment as successful
-        });
-
-        console.log(`Appointment created for ID: ${appointment.id}`);
-
-        // Calculate amounts from the payment intent
-        const totalAmount = paymentIntent.amount / 100; // Convert cents to dollars
-        const tax = parseFloat((totalAmount * 0.13).toFixed(2)); // Assuming tax is 13%
-        const serviceTotal = totalAmount - tax - (tip || 0); // Calculate service total (excluding tax and tip)
-
-        // Create payment record
-        try {
-            const payment = await Payment.create({
-                appointmentId: appointment.id,
-                UserId: userId,
-                amount: serviceTotal,
-                tax: tax,
-                tip: tip || 0,
-                totalAmount: totalAmount,
-                currency: paymentIntent.currency.toUpperCase(),
-                paymentStatus: 'Success',
-                paymentIntentId: paymentIntent.id,
-            });
-            console.log("Payment created successfully:", payment);
-        } catch (err) {
-            console.error("Error creating payment:", err);
-            throw new Error("Error creating payment record");
-        }
-
-        console.log(`Payment record created for appointment ID: ${appointment.id}`);
-    } catch (err) {
-        console.error('Error handling successful payment:', err.message);
-        throw new Error('Error processing successful payment');
-    }
-}
-
-// Helper function to handle failed payments
-async function handlePaymentFailure(paymentIntent) {
-    try {
-        // Update the payment record with failure status and reason
-        await Payment.update(
-            {
-                paymentStatus: 'Failed',
-                failureReason: paymentIntent.last_payment_error?.message || 'Unknown error',
-            },
-            { where: { paymentIntentId: paymentIntent.id } }
-        );
-
-        console.log(`Payment failed for intent ID: ${paymentIntent.id}`);
-    } catch (err) {
-        console.error('Error handling failed payment:', err.message);
-        throw new Error('Error processing failed payment');
-    }
-}
 
 exports.handleWebhook = async (req, res) => {
+    const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET; // Replace with your webhook signing secret from Stripe
+
+    console.log('Received Stripe webhook:', req.body);
+
+    console.log('Received Stripe webhook:', endpointSecret);
+
     const sig = req.headers['stripe-signature'];
+
+    if (!sig) {
+        console.error('Missing stripe-signature header');
+        return res.status(400).send('Webhook Error: Missing stripe-signature header');
+    }
+
     let event;
 
     try {
-        // Verify the webhook signature
-        event = stripe.webhooks.constructEvent(
-            req.rawBody,
-            sig,
-            process.env.STRIPE_WEBHOOK_SECRET
-        );
+        // Verify the event by checking the signature
+        event = stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
     } catch (err) {
         console.error('Webhook signature verification failed:', err.message);
         return res.status(400).send(`Webhook Error: ${err.message}`);
     }
 
-    // Handle different event types
+    // Handle the event
     switch (event.type) {
-        case 'payment_intent.succeeded':
-            await handlePaymentSuccess(event.data.object);
-            break;
+        case 'payment_intent.succeeded': {
+            const paymentIntent = event.data.object;
+            console.log('PaymentIntent was successful:', paymentIntent);
 
-        case 'payment_intent.payment_failed':
-            await handlePaymentFailure(event.data.object);
-            break;
+            // Extract metadata
+            const userId = paymentIntent.metadata.user_id;
+            const appointmentData = JSON.parse(paymentIntent.metadata.appointmentData);
+            const tip = parseFloat(paymentIntent.metadata.tip || 0);
+            const totalAmount = paymentIntent.amount / 100; // Convert cents to dollars
+            const currency = paymentIntent.currency.toUpperCase();
 
+            try {
+                // Create an Appointment record in the database
+                const appointment = await Appointment.create({
+                    UserId: userId,
+                    BarberId: appointmentData.BarberId,
+                    SalonId: appointmentData.SalonId,
+                    SlotId: appointmentData.SlotId,
+                    number_of_people: appointmentData.number_of_people,
+                    status: 'appointment', // Default status for a new appointment
+                    appointment_date: appointmentData.appointment_date,
+                    appointment_start_time: appointmentData.appointment_start_time,
+                    appointment_end_time: appointmentData.appointment_end_time,
+                    paymentStatus: 'Success', // Mark as paid
+                    paymentMode: 'Pay_Online', // Since this is an online payment
+                    stripePaymentIntentId: paymentIntent.id, // Store the Stripe PaymentIntent ID
+                });
+
+                // Create a Payment record in the database
+                const payment = await Payment.create({
+                    appointmentId: appointment.id, // Link the payment to the appointment
+                    UserId: userId,
+                    amount: totalAmount - tip, // Base amount (excluding tip)
+                    tip: tip,
+                    tax: appointmentData.tax || 0, // Optional tax from metadata
+                    discount: appointmentData.discount || 0, // Optional discount from metadata
+                    totalAmount: totalAmount, // Total amount paid
+                    currency: currency,
+                    paymentStatus: 'Success', // Mark as successful
+                    paymentIntentId: paymentIntent.id, // Store the Stripe PaymentIntent ID
+                    deviceId: appointmentData.deviceId || null,
+                    deviceType: appointmentData.deviceType || null,
+                    deviceModel: appointmentData.deviceModel || null,
+                    osVersion: appointmentData.osVersion || null,
+                    ipAddress: appointmentData.ipAddress || null,
+                    userAgent: appointmentData.userAgent || null,
+                    location: appointmentData.location || null,
+                    description: `Payment for appointment ID ${appointment.id}`,
+                    notes: appointmentData.notes || null,
+                    paymentInitiatedAt: paymentIntent.created ? new Date(paymentIntent.created * 1000) : null,
+                    paymentCompletedAt: new Date(), // Current timestamp
+                });
+
+                console.log('Appointment and Payment records created successfully:', {
+                    appointment,
+                    payment,
+                });
+
+                // Send a success response
+                res.status(200).json({ success: true, message: 'Appointment and Payment created successfully' });
+            } catch (dbError) {
+                console.error('Error saving Appointment or Payment to the database:', dbError);
+                return res.status(500).send('Database Error: Failed to save Appointment or Payment');
+            }
+
+            break;
+        }
+
+        case 'payment_intent.payment_failed': {
+            const failedPaymentIntent = event.data.object;
+            console.error('PaymentIntent failed:', failedPaymentIntent);
+
+            // Handle the failed payment, e.g., notify the user or log the failure
+            break;
+        }
+
+        // Add more cases for other event types you want to handle
         default:
             console.log(`Unhandled event type: ${event.type}`);
     }
 
-    // Respond to Stripe to acknowledge receipt of the event
+    // Return a response to acknowledge receipt of the event
     res.json({ received: true });
 };
+
+
