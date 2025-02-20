@@ -67,7 +67,7 @@ app.get('/', (req, res) => {
 
 
 // Define port
-const PORT = process.env.PORT || 8012;
+const PORT = process.env.PORT || 8011;
 
 // Swagger setup
 const swaggerOptions = {
