@@ -1,9 +1,12 @@
 const express = require("express");
+const bodyParser = require("body-parser");
 const paymentController = require("../controllers/payment.controller");
-const { authenticateJWT } = require('../middleware/auth.middleware'); // Assuming JWT authentication middleware
 
 module.exports = (app) => {
   const apiPrefix = "/api/payment";
+
+  // JSON parsing for all routes except webhooks
+  app.use(express.json());
 
   /**
    * @swagger
@@ -279,6 +282,11 @@ module.exports = (app) => {
    *                   type: string
    *                   example: "Database Error: Failed to save Appointment or Payment"
    */
+  app.post(
+    `${apiPrefix}/webhook`,
+    express.raw({ type: 'application/json' }), // Ensures raw body for Stripe signature verification
+    paymentController.handleWebhook
+  );
 
-  app.post(`${apiPrefix}/webhook`, express.raw({ type: 'application/json' }), paymentController.handleWebhook);
+  // All other routes should use JSON parsing
 };

@@ -11,6 +11,16 @@ const db = require('./app/models');
 dotenv.config();
 
 const app = express();
+app.use(
+  bodyParser.json({
+      verify: function (req, res, buf) {
+          if (req.originalUrl.includes('/webhook')) {
+              req.rawBody = buf; // Save raw body for Stripe
+          }
+      }
+  })
+);
+
 const server = http.createServer(app);
 const io = socketIo(server, {
   cors: {

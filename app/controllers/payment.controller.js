@@ -52,11 +52,7 @@ exports.createPayment = async (req, res) => {
 
 
 exports.handleWebhook = async (req, res) => {
-    const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET; // Replace with your webhook signing secret from Stripe
-
-    console.log('Received Stripe webhook:', req.body);
-
-    console.log('Received Stripe webhook:', endpointSecret);
+    const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
     const sig = req.headers['stripe-signature'];
 
@@ -68,12 +64,22 @@ exports.handleWebhook = async (req, res) => {
     let event;
 
     try {
-        // Verify the event by checking the signature
-        event = stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
+        console.log("Raw request body:", req.body);
+        // req.body is now a Buffer, exactly what Stripe needs
+        event = stripe.webhooks.constructEvent(
+            req.rawBody,
+            sig,
+            endpointSecret
+        );
     } catch (err) {
         console.error('Webhook signature verification failed:', err.message);
         return res.status(400).send(`Webhook Error: ${err.message}`);
     }
+
+    // Parse the raw body for our own use after verification
+    //const payload = JSON.parse(req.body.toString());
+
+    //console.log('Webhook event received:', payload);
 
     // const event = req.body;
 
