@@ -465,7 +465,7 @@ async function handleBarberCategoryLogic(barber, user_id, totalServiceTime, appo
     }
 }
 
-exports.handleBarberCategoryLogic = handleBarberCategoryLogic;
+exports.handleBarberCategoryLogicExp = handleBarberCategoryLogic;
 
 
 async function validateAndAttachServices(appointment, service_ids, res) {
@@ -683,6 +683,9 @@ exports.create = async (req, res) => {
 };
 
 /* Appointment create end */
+
+
+
 
 
 /* Appointment update start */
