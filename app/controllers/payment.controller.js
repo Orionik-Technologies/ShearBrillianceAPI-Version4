@@ -9,104 +9,9 @@ const { appCheck } = require('firebase-admin');
 const { sendEmail } = require("../services/emailService");
 const { sendMessageToUser } = require('./socket.controller');
 const { sendSMS } = require('../services/smsService');
+const { BarberCategoryENUM } = require('../config/barberCategory.config');
+const { calculateRemainingTimeExp, prepareEmailDataExp, sendAppointmentNotificationsExp } = require('../controllers/appointments.controller');
 
-// Helper function to send notifications
-async function sendAppointmentNotifications(appointment, name, mobile_number, user_id, salon_id) {
-    const salon = await db.Salon.findOne({ where: { id: salon_id } });
-    const salonName = salon ? salon.name : 'the selected salon';
-
-    const message = `Dear ${name}, your appointment has been successfully booked at ${salonName}. ${
-        appointment.estimated_wait_time 
-            ? `The estimated wait time is ${appointment.estimated_wait_time} minutes.`
-            : `Your appointment is scheduled for ${appointment.appointment_date} at ${appointment.appointment_start_time}.`
-    } We look forward to serving you.`;
-
-    try {
-        await sendSMS(mobile_number, message);
-        console.log("SMS sent successfully.");
-    } catch (smsError) {
-        console.error("Failed to send SMS:", smsError.message);
-    }
-
-    // Send app notification
-    const fcmTokens = await FcmToken.findAll({ where: { UserId: user_id } });
-    if (fcmTokens.length > 0) {
-        const notificationTitle = "Appointment Confirmed";
-        const notificationBody = `Your appointment at ${salonName} has been confirmed.`;
-
-        for (const token of fcmTokens) {
-            await sendNotificationToUser(token.token, notificationTitle, notificationBody);
-        }
-    }
-}
-
-
-// Helper function to prepare email data when appointment create for walk_In and Appointment
-const prepareEmailData = (appointment, barber, salon, services, isWalkIn, validatedTip, tax, totalAmount) => {
-    const formatTo12Hour = (time) => {
-        const [hours, minutes, seconds] = time.split(":").map(Number);
-        const date = new Date(1970, 0, 1, hours, minutes, seconds); // Create a valid Date object
-        return date.toLocaleString("en-US", {
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit",
-            hour12: true,
-        });
-    };
-
-    const serviceNames = services && services.length > 0
-        ? services.map((service) => service.name || "Unknown Service").join(", ")
-        : "No services selected";
-
-    const salonName = salon ? salon.name : "the selected salon";
-    const salonAddress = salon ? salon.address : "the selected salon";
-
-    if (isWalkIn) {
-        return {
-            is_walk_in: true,
-            customer_name: appointment.name,
-            barber_name: barber.name,
-            appointment_date: new Date().toLocaleString("en-US", {
-                weekday: "short",
-                year: "numeric",
-                month: "short",
-                day: "numeric",
-            }),
-            salon_name: salonName,
-            location: salonAddress,
-            services: serviceNames,
-            tip: validatedTip,
-            tax: tax,
-            total_amount: totalAmount,
-            email_subject: "Walk-in Appointment Confirmation",
-            cancel_url: `${process.env.FRONTEND_URL}/appointment_confirmation/${appointment.id}`,
-        };
-    } else {
-        return {
-            is_walk_in: false,
-            customer_name: appointment.name,
-            barber_name: barber.name,
-            appointment_date: new Date(appointment.appointment_date).toLocaleDateString("en-US", {
-                weekday: "short",
-                year: "numeric",
-                month: "short",
-                day: "numeric",
-            }),
-            appointment_start_time: formatTo12Hour(appointment.appointment_start_time),
-            appointment_end_time: formatTo12Hour(appointment.appointment_end_time),
-            salon_name: salonName,
-            location: salonAddress,
-            services: serviceNames,
-            tip: validatedTip,
-            tax: tax,
-            total_amount: totalAmount,
-            payment_mode: appointment.paymentStatus,
-            payment_status: appointment.paymentStatus,
-            email_subject: "Appointment Confirmation",
-            cancel_url: `${process.env.FRONTEND_URL}/appointment_confirmation/${appointment.id}`,
-        };
-    }
-};
 
 
 
@@ -284,7 +189,7 @@ exports.handleWebhook = async (req, res) => {
                     console.error('User not found for email notification');
                 } else {
                     // Prepare email data
-                    const emailData = prepareEmailData(
+                    const emailData = prepareEmailDataExp(
                         appointment,
                         barber,
                         salon,

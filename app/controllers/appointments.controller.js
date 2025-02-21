@@ -32,7 +32,6 @@ const { broadcastBoardUpdates } = require('../controllers/socket.controller');
 const { sendNotificationToUser } = require("../services/notificationService");
 const { INVITE_BOOKING_APPOINTMENT_TEMPLATE_ID } = require("../config/sendGridConfig");
 const {INVITE_CANCEL_APPOINTMENT_TEMPLATE_ID} =require("../config/sendGridConfig");
-const { createPayment } = require('../controllers/payment.controller');
 
 
 let io; // Declare io in the controller's scope
@@ -210,6 +209,9 @@ function calculateRemainingTime(barberSession, activeAppointments) {
     );
 }
 
+exports.calculateRemainingTimeExp = calculateRemainingTime;
+
+
 
 // Helper function to mark slots as booked
 async function markSlotsAsBooked(slots) {
@@ -220,6 +222,9 @@ async function markSlotsAsBooked(slots) {
         );
     }
 }
+
+exports.markSlotsAsBookedExp = markSlotsAsBooked;
+
 
 // Helper function to verify consecutive available slots
 async function verifyConsecutiveSlots(barberSessionId, slotDate, startTime, totalServiceTime) {
@@ -247,6 +252,9 @@ async function verifyConsecutiveSlots(barberSessionId, slotDate, startTime, tota
 
     return consecutiveSlots.length * 15 >= totalServiceTime ? consecutiveSlots : null;
 }
+
+exports.verifyConsecutiveSlotsExp = verifyConsecutiveSlots;
+
 
 // Helper function to send notifications
 async function sendAppointmentNotifications(appointment, name, mobile_number, user_id, salon_id) {
@@ -278,9 +286,11 @@ async function sendAppointmentNotifications(appointment, name, mobile_number, us
     }
 }
 
+exports.sendAppointmentNotificationsExp = sendAppointmentNotifications;
+
 
 // Helper function to prepare email data when appointment create for walk_In and Appointment
-const prepareEmailData = (appointment, barber, salon, services, isWalkIn, validatedTip, tax, totalAmount) => {
+const prepareEmailData = (appointment, barber, salon, services,  validatedTip, tax, totalAmount) => {
     const formatTo12Hour = (time) => {
         const [hours, minutes, seconds] = time.split(":").map(Number);
         const date = new Date(1970, 0, 1, hours, minutes, seconds); // Create a valid Date object
@@ -298,6 +308,7 @@ const prepareEmailData = (appointment, barber, salon, services, isWalkIn, valida
 
     const salonName = salon ? salon.name : "the selected salon";
     const salonAddress = salon ? salon.address : "the selected salon";
+    const isWalkIn = barber.category === BarberCategoryENUM.ForWalkIn;
 
     if (isWalkIn) {
         return {
@@ -346,6 +357,199 @@ const prepareEmailData = (appointment, barber, salon, services, isWalkIn, valida
     }
 };
 
+exports.prepareEmailDataExp = prepareEmailData;
+
+
+async function handleBarberCategoryLogic(barber, user_id, totalServiceTime, appointmentData, slot_id) {
+    try {
+        if (barber.category === BarberCategoryENUM.ForWalkIn) {
+            // Walk-in logic
+            const today = new Date();
+            const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0);
+            const todayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999);
+
+            // Check if the user already has an active appointment
+            const activeAppointment = await db.Appointment.findOne({
+                where: { UserId: user_id, status: [AppointmentENUM.Checked_in, AppointmentENUM.In_salon] }
+            });
+            if (activeAppointment) {
+                throw new Error("You already have an active appointment. Please complete or cancel it before booking a new one.");
+            }
+
+            // Retrieve the barber session
+            const barberSession = await db.BarberSession.findOne({
+                where: {
+                    BarberId: barber.id,
+                    session_date: { [Op.between]: [todayStart, todayEnd] }
+                },
+                attributes: ['id', 'start_time', 'end_time', 'session_date', 'remaining_time']
+            });
+
+            if (!barberSession) {
+                throw new Error('Barber is not available for appointments today');
+            }
+
+            // Check for existing appointments for the barber
+            const activeBarberAppointments = await db.Appointment.findAll({
+                where: {
+                    BarberId: barber.id,
+                    status: [AppointmentENUM.Checked_in, AppointmentENUM.In_salon]
+                },
+            });
+
+            let remainingTime = calculateRemainingTime(barberSession, activeBarberAppointments);
+            if (remainingTime < totalServiceTime) {
+                throw new Error('Not enough remaining time for this appointment');
+            }
+
+            const { totalWaitTime, numberOfUsersInQueue } = await getEstimatedWaitTimeForBarber(barber.id);
+
+            // Update appointmentData for walk-in
+            appointmentData.status = AppointmentENUM.Checked_in;
+            appointmentData.estimated_wait_time = totalWaitTime;
+            appointmentData.queue_position = numberOfUsersInQueue + 1;
+            appointmentData.check_in_time = new Date();
+
+            // Update barber session remaining time
+            await barberSession.update({ 
+                remaining_time: remainingTime - totalServiceTime 
+            });
+        } else {
+            // Appointment-based logic
+            if (!slot_id) {
+                throw new Error('Slot ID is required for appointments');
+            }
+
+            // Get the selected slot
+            const slot = await db.Slot.findOne({
+                where: { 
+                    id: slot_id,
+                    is_booked: false
+                }
+            });
+
+            if (!slot) {
+                throw new Error('Selected slot is not available');
+            }
+
+            // Calculate end time based on services duration
+            const startTime = new Date(`${slot.slot_date} ${slot.start_time}`);
+            const endTime = new Date(startTime.getTime() + totalServiceTime * 60000);
+
+            // Verify if enough consecutive slots are available
+            const requiredSlots = await verifyConsecutiveSlots(
+                slot.BarberSessionId, 
+                slot.slot_date, 
+                slot.start_time, 
+                totalServiceTime
+            );
+
+            if (!requiredSlots) {
+                throw new Error('Not enough consecutive slots available');
+            }
+
+            // Update appointmentData for appointment-based
+            appointmentData.status = AppointmentENUM.Appointment;
+            appointmentData.SlotId = slot_id;
+            appointmentData.appointment_date = slot.slot_date;
+            appointmentData.appointment_start_time = slot.start_time;
+            appointmentData.appointment_end_time = endTime.toTimeString().split(' ')[0];
+
+            // Mark slots as booked
+            await markSlotsAsBooked(requiredSlots);
+        }
+
+        return appointmentData; // Return updated appointmentData
+    } catch (error) {
+        throw error; // Re-throw error to be handled by the caller
+    }
+}
+
+exports.handleBarberCategoryLogic = handleBarberCategoryLogic;
+
+
+async function validateAndAttachServices(appointment, service_ids, res) {
+    if (!service_ids || !Array.isArray(service_ids) || service_ids.length === 0) {
+        return; // No services to validate or attach
+    }
+
+    // Fetch valid services from the database
+    const validServices = await db.Service.findAll({
+        where: { id: service_ids },
+        attributes: ['id', 'name', 'min_price', 'max_price', 'default_service_time']
+    });
+
+    console.log("Valid services fetched:", validServices);
+
+    const validServiceIds = validServices.map(service => service.id);
+    const invalidServiceIds = service_ids.filter(id => !validServiceIds.includes(id));
+
+    // Check if all service_ids are valid
+    if (invalidServiceIds.length > 0) {
+        return sendResponse(res, false, 'Some selected services are invalid or duplicate', null, 400);
+    }
+
+    // Attach valid services to the appointment, including duplicates
+    for (const serviceId of service_ids) {
+        if (validServiceIds.includes(serviceId)) {
+            await db.AppointmentService.create({
+                AppointmentId: appointment.id,
+                ServiceId: serviceId
+            });
+        }
+    }
+
+    return validServices; // Return valid services for potential further use
+}
+
+exports.validateAndAttachServicesExp = validateAndAttachServices;
+
+
+async function fetchAppointmentWithServices(appointmentId) {
+    const appointmentWithServices = await db.Appointment.findOne({
+        where: { id: appointmentId },
+        include: [
+            {
+                model: db.Salon,
+                as: 'salon',
+                attributes: { exclude: ['createdAt', 'updatedAt'] },
+            },
+            {
+                model: db.Service,
+                attributes: ['id', 'name', 'default_service_time'],
+                through: { attributes: [] },
+            }
+        ],
+    });
+
+    if (appointmentWithServices) {
+        // Fetch associated services manually to preserve duplicates
+        const appointmentServices = await db.AppointmentService.findAll({
+            where: { AppointmentId: appointmentWithServices.id }
+        });
+        const serviceIds = appointmentServices.map(as => as.ServiceId);
+
+        // Fetch service details
+        const servicesMap = await db.Service.findAll({
+            where: { id: serviceIds },
+            attributes: ['id', 'name', 'min_price', 'max_price', 'default_service_time']
+        }).then(services => {
+            return services.reduce((map, service) => {
+                map[service.id] = service;
+                return map;
+            }, {});
+        });
+
+        // Map services back, preserving order and duplicates
+        const services = appointmentServices.map(as => servicesMap[as.ServiceId]);
+        appointmentWithServices.dataValues.Services = services;
+    }
+
+    return appointmentWithServices;
+}
+
+exports.fetchAppointmentWithServicesExp = fetchAppointmentWithServices;
+
 
 exports.create = async (req, res) => {
     try {
@@ -370,11 +574,12 @@ exports.create = async (req, res) => {
             return freq;
         }, {});
 
-        // Calculate total time considering frequency
+        // Move this calculation before any conditionals
         const totalServiceTime = services.reduce((sum, service) => {
             const frequency = serviceFrequency[service.id] || 0;
             return sum + (service.default_service_time * frequency);
         }, 0);
+
 
         const totalServiceCost = services.reduce((sum, service) => {
             const frequency = serviceFrequency[service.id] || 0;
@@ -398,119 +603,13 @@ exports.create = async (req, res) => {
             total_amount: totalAmount
         };
 
-        if(barber.category === BarberCategoryENUM.ForWalkIn) {
-            // Walk-in logic
-            const today = new Date();
-            const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0);
-            const todayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999);
-
-                // Check if the user already has an active appointment
-                const activeAppointment = await Appointment.findOne({
-                    where: { UserId: user_id, status: [AppointmentENUM.Checked_in, AppointmentENUM.In_salon] }
-                });
-                if (activeAppointment) {
-                    return res.status(400).send({
-                    success: false,
-                    message: "You already have an active appointment. Please complete or cancel it before booking a new one.",
-                    data: null,
-                    code: 400,
-                    });
-                }
-
-            // Retrieve the barber session
-            const barberSession = await BarberSession.findOne({
-                where: {
-                BarberId: barber_id,
-                session_date: { [Op.between]: [todayStart, todayEnd] }
-                },
-                attributes: ['id', 'start_time', 'end_time', 'session_date', 'remaining_time']
-            });
-        
-        if (!barberSession) {
-            return sendResponse(res, false, 'Barber is not available for appointments today', null, 400);
-        }
-    
-        // Check for existing appointments for the barber
-        const activeBarberAppointments = await Appointment.findAll({
-            where: {
-            BarberId: barber_id,
-            status: [AppointmentENUM.Checked_in, AppointmentENUM.In_salon]
-            },
-        });
-
-        let remainingTime = calculateRemainingTime(barberSession, activeBarberAppointments);
-        if (remainingTime < totalServiceTime) {
-            return sendResponse(res, false, 'Not enough remaining time for this appointment', null, 400);
-        }
-
-        const { totalWaitTime, numberOfUsersInQueue } = await getEstimatedWaitTimeForBarber(barber_id);
-        
-        appointmentData = {
-            ...appointmentData,
-            status: AppointmentENUM.Checked_in,
-            estimated_wait_time: totalWaitTime,
-            queue_position: numberOfUsersInQueue + 1,
-            check_in_time: new Date(),
-        };
-
-            // Update barber session remaining time
-            await barberSession.update({ 
-                remaining_time: remainingTime - totalServiceTime 
-            });
-
-        } else {
-
-            // Appointment-based logic (category 1)
-            if (!slot_id) {
-                return sendResponse(res, false, 'Slot ID is required for appointments', null, 400);
-            }
-
-            // Get the selected slot
-            const slot = await db.Slot.findOne({
-                where: { 
-                    id: slot_id,
-                    is_booked: false
-                }
-            });
-
-            if (!slot) {
-                return sendResponse(res, false, 'Selected slot is not available', null, 400);
-            }
-
-            // Calculate end time based on services duration
-            const startTime = new Date(`${slot.slot_date} ${slot.start_time}`);
-            const endTime = new Date(startTime.getTime() + totalServiceTime * 60000);
-
-            // Verify if enough consecutive slots are available
-            const requiredSlots = await verifyConsecutiveSlots(
-                slot.BarberSessionId, 
-                slot.slot_date, 
-                slot.start_time, 
-                totalServiceTime
-            );
-
-            if (!requiredSlots) {
-                return sendResponse(res, false, 'Not enough consecutive slots available', null, 400);
-            }
-
-            appointmentData = {
-                ...appointmentData,
-                status: AppointmentENUM.Appointment,
-                SlotId: slot_id,
-                appointment_date: slot.slot_date,
-                appointment_start_time: slot.start_time,
-                appointment_end_time: endTime.toTimeString().split(' ')[0],
-            };
-
-            // Mark slots as booked
-            await markSlotsAsBooked(requiredSlots);
-        }
+        // Call the new function to handle barber category logic
+        appointmentData = await handleBarberCategoryLogic(barber, user_id, totalServiceTime, appointmentData, slot_id);
 
         if (payment_mode === PaymentMethodENUM.Pay_In_Person) {
             // For pay in person, create appointment with pending status
             appointmentData = {
                 ...appointmentData,
-                status: AppointmentENUM.Appointment,
                 paymentStatus: 'Pending',
                 paymentMode: PaymentMethodENUM.Pay_In_Person,
             };
@@ -530,85 +629,23 @@ exports.create = async (req, res) => {
             });
             
             // Ensure service_ids contains only valid and selected services
-            if (service_ids && Array.isArray(service_ids) && service_ids.length > 0) {
-                // Fetch valid services from the database
-                const validServices = await Service.findAll({ 
-                    where: { id: service_ids },
-                    attributes: ['id', 'name', 'min_price', 'max_price', 'default_service_time']
-                });
-
-                console.log("Valid services fetched:", validServices);
-
-                const validServiceIds = validServices.map(service => service.id);
-                const invalidServiceIds = service_ids.filter(id => !validServiceIds.includes(id));
-
-                // Check if all unique service_ids are valid
-                if (invalidServiceIds.length > 0) {
-                    return sendResponse(res, false, 'Some selected services are invalid or duplicate', null, 400);
-                }
-
-                // Attach only the selected and valid services// Add services, including duplicates
-                for (const serviceId of service_ids) {
-                    if (validServiceIds.includes(serviceId)) {
-                        //await appointment.addService(serviceId); // Pass only the service ID
-                        await AppointmentService.create({
-                            AppointmentId: appointment.id,
-                            ServiceId: serviceId
-                        });
-                    }
-                }
-                
-            }
+            // Validate and attach services
+            const validServices = await validateAndAttachServices(appointment, service_ids, res);
+            if (res.headersSent) return; // Exit if response was sent due to invalid services
 
 
-            // Get updated appointment with services
-            let appointmentWithServices = await Appointment.findOne({
-                where: { id: appointment.id },
-                include: [ {
-                    model: Salon,
-                    as: 'salon',
-                    attributes: { exclude: ['createdAt', 'updatedAt'] },
-                },{
-                    model: Service,
-                    attributes: ['id', 'name', 'default_service_time'],
-                    through: { attributes: [] },
-                }],
-            });
+            // Fetch appointment with services
+            const appointmentWithServices = await fetchAppointmentWithServices(appointment.id);
+
+            
 
             if (appointmentWithServices) {
-                // Manually fetch associated services
-                const appointmentServices = await AppointmentService.findAll({
-                    where: {
-                        AppointmentId: appointmentWithServices.id
-                    }
-                });
-                const serviceIds = appointmentServices.map(as => as.ServiceId);
-                // Get all service IDs
-                const servicesMap = await Service.findAll({
-                    where: {
-                        id: serviceIds
-                    },
-                    attributes: ['id', 'name', 'min_price', 'max_price', 'default_service_time']
-                }).then(services => {
-                    // Create a map of services by ID for quick lookup
-                    return services.reduce((map, service) => {
-                        map[service.id] = service;
-                        return map;
-                    }, {});
-                });
-
-                // Map back to maintain order and duplicates
-                const services = appointmentServices.map(as => servicesMap[as.ServiceId]);
-               
-                // Add services to appointment object
-                appointmentWithServices.dataValues.Services = services;
-
                 const salon = await db.Salon.findByPk(salon_id);
                 const emailData = prepareEmailData(
                     appointment,
                     barber,
                     salon,
-                    services,
+                    appointmentWithServices.dataValues.Services,
                     validatedTip,
                     tax,
                     totalAmount
@@ -635,6 +672,7 @@ exports.create = async (req, res) => {
             // Send notifications
             await sendAppointmentNotifications(appointment, name, mobile_number, user_id, salon_id);
 
+            
             return sendResponse(res, true, 'Appointment created successfully', appointmentWithServices, 201);
 
         }
@@ -2727,3 +2765,4 @@ exports.appointmentByUserId = async (req, res) => {
 exports.getAppointmentsByRoleExp = getAppointmentsByRole;
 
 exports.getInSalonAppointmentsByRoleExp = getInSalonAppointmentsByRole;
+
