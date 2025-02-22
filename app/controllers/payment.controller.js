@@ -241,6 +241,31 @@ exports.handleWebhook = async (req, res) => {
         return res.status(400).send(`Webhook Error: ${err.message}`);
     }
 
+    const handleRefundUpdates = async (refund, paymentIntentId) => {
+        const payment = await Payment.findOne({ where: { paymentIntentId } });
+        if (!payment) {
+            console.error('Payment not found for refund:', paymentIntentId);
+            return;
+        }
+
+        const paymentStatus = refund.status === 'succeeded' ? 'Refunded' : refund.status === 'failed' ? 'Failed' : 'Pending';
+        await payment.update({
+            paymentStatus,
+            refundId: refund.id,
+            refundReason: refund.reason || 'Unknown',
+            refundedAt: refund.status === 'succeeded' ? new Date() : null,
+        });
+
+        const appointment = await Appointment.findOne({ where: { id: payment.appointmentId } });
+        if (appointment) {
+            await appointment.update({
+                status: refund.status === 'succeeded' ? 'canceled' : appointment.status, // Cancel only on successful refund
+                paymentStatus, // Sync with Payment status
+                cancel_time: refund.status === 'succeeded' ? new Date() : appointment.cancel_time,
+            });
+        }
+    };
+
     switch (event.type) {
         case 'payment_intent.succeeded': {
             const paymentIntent = event.data.object;
@@ -249,91 +274,97 @@ exports.handleWebhook = async (req, res) => {
             const userId = paymentIntent.metadata.user_id;
             const appointmentData = JSON.parse(paymentIntent.metadata.appointmentData);
             const tip = parseFloat(paymentIntent.metadata.tip || 0);
-            const totalAmount = paymentIntent.amount / 100; // Convert cents to dollars
+            const totalAmount = paymentIntent.amount / 100;
 
-            // Ensure paymentMode is explicitly set and cleaned
             const cleanedAppointmentData = {
                 ...appointmentData,
-                UserId: userId, // Ensure UserId is set
-                paymentMode: appointmentData.payment_mode || PaymentMethodENUM.Pay_Online || 'Pay_Online', // Handle both cases with fallback
+                UserId: userId,
+                paymentMode: appointmentData.payment_mode || PaymentMethodENUM.Pay_Online,
                 paymentStatus: 'Success',
                 stripePaymentIntentId: paymentIntent.id,
-                // Handle null-like strings
                 estimated_wait_time: appointmentData.estimated_wait_time === 'null' ? null : appointmentData.estimated_wait_time,
                 queue_position: appointmentData.queue_position === 'null' ? null : appointmentData.queue_position,
             };
 
             console.log('Cleaned Appointment Data:', cleanedAppointmentData);
 
-            // Create appointment
-            const appointment = await Appointment.create(cleanedAppointmentData);
-           
-            // Create payment record
-            await Payment.create({
-                appointmentId: appointment.id,
-                UserId: userId,
-                amount: totalAmount - tip - (appointmentData.tax || 0),
-                tax: appointmentData.tax || 0,
-                tip: tip,
-                totalAmount: totalAmount,
-                paymentStatus: 'Success',
-                paymentIntentId: paymentIntent.id,
-                paymentMethod: PaymentMethodENUM.Pay_Online,
-                paymentCompletedAt: new Date(),
-            });
+            try {
+                const appointment = await Appointment.create(cleanedAppointmentData);
 
-            // Validate and attach services
-            await validateAndAttachServicesExp(appointment, appointmentData.service_ids, res);
+                await Payment.create({
+                    appointmentId: appointment.id,
+                    UserId: userId,
+                    amount: totalAmount - tip - (appointmentData.tax || 0),
+                    tax: appointmentData.tax || 0,
+                    tip,
+                    totalAmount,
+                    paymentStatus: 'Success',
+                    paymentIntentId: paymentIntent.id,
+                    paymentMethod: PaymentMethodENUM.Pay_Online,
+                    paymentCompletedAt: new Date(),
+                });
 
-            // Fetch appointment with services
-            const appointmentWithServices = await fetchAppointmentWithServicesExp(appointment.id);
+                await validateAndAttachServicesExp(appointment, appointmentData.service_ids, res);
+                const appointmentWithServices = await fetchAppointmentWithServicesExp(appointment.id);
 
-            // Send email and notifications
-            const barber = await db.Barber.findByPk(appointmentData.BarberId);
-            const salon = await db.Salon.findByPk(appointmentData.SalonId);
-            const user = await db.USER.findOne({ where: { id: userId }, attributes: ['email'] });
+                const barber = await db.Barber.findByPk(appointmentData.BarberId);
+                const salon = await db.Salon.findByPk(appointmentData.SalonId);
+                const user = await db.USER.findOne({ where: { id: userId }, attributes: ['email'] });
 
-            let receiptUrl = paymentIntent.charges?.data[0]?.receipt_url;
-            if (!receiptUrl) {
+                let receiptUrl = paymentIntent.charges?.data[0]?.receipt_url;
+                if (!receiptUrl) {
+                    try {
+                        const charge = await stripe.charges.retrieve(paymentIntent.latest_charge);
+                        receiptUrl = charge.receipt_url;
+                    } catch (error) {
+                        console.error('Error retrieving charge:', error);
+                    }
+                }
+
+                if (user) {
+                    const emailData = prepareEmailDataExp(
+                        appointment,
+                        barber,
+                        salon,
+                        appointmentWithServices.dataValues.Services,
+                        tip,
+                        appointmentData.tax || 0,
+                        totalAmount,
+                        receiptUrl || null
+                    );
+                    await sendEmail(
+                        user.email,
+                        "Your Online Payment Appointment Booked Successfully",
+                        INVITE_BOOKING_APPOINTMENT_TEMPLATE_ID,
+                        emailData
+                    );
+                }
+
+                await sendAppointmentNotificationsExp(appointment, appointmentData.name, appointmentData.mobile_number, userId, appointmentData.SalonId);
+
+                if (barber?.category === BarberCategoryENUM.ForWalkIn) {
+                    const updatedAppointments = await getAppointmentsByRoleExp(false);
+                    if (updatedAppointments) broadcastBoardUpdates(updatedAppointments);
+                }
+
+                return res.json({ received: true });
+            } catch (error) {
+                console.error('Error processing payment intent succeeded:', error);
+
                 try {
-                    const charge = await stripe.charges.retrieve(paymentIntent.latest_charge);
-                    receiptUrl = charge.receipt_url;
-                } catch (error) {
-                    console.error('Error retrieving charge:', error);
+                    const refund = await stripe.refunds.create({
+                        payment_intent: paymentIntent.id,
+                        reason: 'requested_by_customer',
+                    });
+                    console.log('Refund initiated:', refund);
+
+                    await handleRefundUpdates(refund, paymentIntent.id);
+                    return res.json({ received: true, error: 'Appointment processing failed, refund initiated' });
+                } catch (refundError) {
+                    console.error('Error initiating refund:', refundError);
+                    return res.json({ received: true, error: 'Appointment processing failed and refund could not be initiated' });
                 }
             }
-            console.log('Receipt URL:', receiptUrl); // Debug log
-
-            if (user) {
-                console.log('Appointment Payment Mode:', appointment.paymentMode); // Debug log
-                const emailData = prepareEmailDataExp(
-                    appointment,
-                    barber,
-                    salon,
-                    appointmentWithServices.dataValues.Services,
-                    tip,
-                    appointmentData.tax || 0,
-                    totalAmount,
-                    receiptUrl || null // Explicitly pass null if receipt URL is undefined
-                );
-                console.log('Email Data:', emailData); // Debug log
-
-                await sendEmail(
-                    user.email,
-                    "Your Online Payment Appointment Booked Successfully",
-                    INVITE_BOOKING_APPOINTMENT_TEMPLATE_ID,
-                    emailData
-                );
-            }
-
-            await sendAppointmentNotificationsExp(appointment, appointmentData.name, appointmentData.mobile_number, userId, appointmentData.SalonId);
-
-            if (barber.category === BarberCategoryENUM.ForWalkIn) {
-                const updatedAppointments = await getAppointmentsByRoleExp(false);
-                if (updatedAppointments) broadcastBoardUpdates(updatedAppointments);
-            }
-
-            return res.json({ received: true });
         }
 
         case 'payment_intent.payment_failed': {
@@ -344,66 +375,14 @@ exports.handleWebhook = async (req, res) => {
         case 'refund.created': {
             const refund = event.data.object;
             console.log('Refund created:', refund);
-
-            const paymentIntentId = refund.payment_intent;
-            const refundId = refund.id;
-
-            // Find the payment record
-            const payment = await db.Payment.findOne({ where: { paymentIntentId } });
-            if (!payment) {
-                console.error('Payment not found for refund:', paymentIntentId);
-                return res.json({ received: true });
-            }
-
-            // Update payment with refund details
-            await payment.update({
-                paymentStatus: refund.status === 'succeeded' ? 'Refunded' : 'Pending',
-                refundId: refundId,
-                refundReason: refund.reason || 'Unknown',
-                refundedAt: refund.status === 'succeeded' ? new Date() : null,
-            });
-
-            // Update associated appointment
-            const appointment = await db.Appointment.findOne({ where: { id: payment.appointmentId } });
-            if (appointment) {
-                await appointment.update({
-                    status: 'canceled',
-                    cancel_time: new Date(),
-                    paymentStatus: refund.status === 'succeeded' ? 'Refunded' : 'Pending',
-                });
-            }
-
+            await handleRefundUpdates(refund, refund.payment_intent);
             return res.json({ received: true });
         }
 
         case 'refund.updated': {
             const refund = event.data.object;
             console.log('Refund updated:', refund);
-
-            const paymentIntentId = refund.payment_intent;
-            const refundId = refund.id;
-
-            // Find the payment record
-            const payment = await db.Payment.findOne({ where: { paymentIntentId } });
-            if (!payment) {
-                console.error('Payment not found for refund update:', paymentIntentId);
-                return res.json({ received: true });
-            }
-
-            // Update payment status based on refund status
-            await payment.update({
-                paymentStatus: refund.status === 'succeeded' ? 'Refunded' : refund.status === 'failed' ? 'Failed' : 'Pending',
-                refundedAt: refund.status === 'succeeded' ? new Date() : null,
-            });
-
-            // Update associated appointment
-            const appointment = await db.Appointment.findOne({ where: { id: payment.appointmentId } });
-            if (appointment) {
-                await appointment.update({
-                    paymentStatus: refund.status === 'succeeded' ? 'Refunded' : refund.status === 'failed' ? 'Failed' : 'Pending',
-                });
-            }
-
+            await handleRefundUpdates(refund, refund.payment_intent);
             return res.json({ received: true });
         }
 
@@ -412,5 +391,3 @@ exports.handleWebhook = async (req, res) => {
             return res.json({ received: true });
     }
 };
-
-
