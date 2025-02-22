@@ -289,4 +289,7 @@ module.exports = (app) => {
   );
 
   // All other routes should use JSON parsing
+
+
+  app.post(`${apiPrefix}/refund`, paymentController.refundPayment);
 };

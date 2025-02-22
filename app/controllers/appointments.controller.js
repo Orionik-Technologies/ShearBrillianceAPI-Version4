@@ -290,7 +290,7 @@ exports.sendAppointmentNotificationsExp = sendAppointmentNotifications;
 
 
 // Helper function to prepare email data when appointment create for walk_In and Appointment
-const prepareEmailData = (appointment, barber, salon, services,  validatedTip, tax, totalAmount) => {
+const prepareEmailData = (appointment, barber, salon, services,  validatedTip, tax, totalAmount, receiptUrl) => {
     const formatTo12Hour = (time) => {
         const [hours, minutes, seconds] = time.split(":").map(Number);
         const date = new Date(1970, 0, 1, hours, minutes, seconds); // Create a valid Date object
@@ -309,6 +309,7 @@ const prepareEmailData = (appointment, barber, salon, services,  validatedTip, t
     const salonName = salon ? salon.name : "the selected salon";
     const salonAddress = salon ? salon.address : "the selected salon";
     const isWalkIn = barber.category === BarberCategoryENUM.ForWalkIn;
+    
 
     if (isWalkIn) {
         return {
@@ -327,8 +328,10 @@ const prepareEmailData = (appointment, barber, salon, services,  validatedTip, t
             tip: validatedTip,
             tax: tax,
             total_amount: totalAmount,
+            payment_mode: appointment.paymentMode || "Pay_Online", //
             email_subject: "Walk-in Appointment Confirmation",
             cancel_url: `${process.env.FRONTEND_URL}/appointment_confirmation/${appointment.id}`,
+            receipt_url: receiptUrl || null, // Always include receipt_url, even if null
         };
     } else {
         return {
@@ -349,10 +352,11 @@ const prepareEmailData = (appointment, barber, salon, services,  validatedTip, t
             tip: validatedTip,
             tax: tax,
             total_amount: totalAmount,
-            payment_mode: appointment.paymentStatus,
+            payment_mode: appointment.paymentMode || "Pay_Online", 
             payment_status: appointment.paymentStatus,
             email_subject: "Appointment Confirmation",
             cancel_url: `${process.env.FRONTEND_URL}/appointment_confirmation/${appointment.id}`,
+            receipt_url: receiptUrl || null, // Always include receipt_url, even if null
         };
     }
 };
