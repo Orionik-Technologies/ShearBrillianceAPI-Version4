@@ -291,7 +291,7 @@ module.exports = (app) => {
   /**
  * @swagger
  * /api/payment/check-payment-status/{paymentIntentId}:
- *   post:
+ *   get:
  *     summary: Check the status of a payment
  *     description: Retrieves the current status of a payment based on its paymentIntentId
  *     tags:
@@ -364,6 +364,6 @@ module.exports = (app) => {
  *                   type: null
  *                   example: null
  */
-  app.post(`${apiPrefix}/check-payment-status`, paymentController.checkPaymentStatus);
+  app.get(`${apiPrefix}/check-payment-status`, paymentController.checkPaymentStatus);
 
 };
