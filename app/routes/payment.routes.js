@@ -189,7 +189,6 @@ module.exports = (app) => {
    *                   type: string
    *                   example: "Failed to create payment intent"
    */
-
   app.post(`${apiPrefix}/create`, paymentController.createPayment);
 
   /**
@@ -288,8 +287,72 @@ module.exports = (app) => {
     paymentController.handleWebhook
   );
 
-  // All other routes should use JSON parsing
+  /**
+   * @swagger
+   * /api/payment/check-payment-status/{paymentIntentId}:
+   *   Post:
+   *     summary: Check Payment Status
+   *     description: Retrieves the status of a payment based on the paymentIntentId.
+   *     parameters:
+   *       - name: paymentIntentId
+   *         in: path
+   *         required: true
+   *         schema:
+   *           type: string
+   *         description: The unique identifier for the payment intent.
+   *     responses:
+   *       200:
+   *         description: Payment status retrieved successfully.
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: true
+   *                 message:
+   *                   type: string
+   *                   example: Payment status retrieved
+   *                 data:
+   *                   type: object
+   *                   properties:
+   *                     status:
+   *                       type: string
+   *                       example: "Succeeded"
+   *       404:
+   *         description: Payment still processing or not found.
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: true
+   *                 message:
+   *                   type: string
+   *                   example: Payment still processing
+   *                 data:
+   *                   type: object
+   *                   properties:
+   *                     status:
+   *                       type: string
+   *                       example: "Pending"
+   *       500:
+   *         description: Server error occurred.
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: false
+   *                 message:
+   *                   type: string
+   *                   example: Failed to check payment status
+   */
+   app.post(`${apiPrefix}/check-payment-status`, paymentController.checkPaymentStatus);
 
-
-  app.post(`${apiPrefix}/refund`, paymentController.refundPayment);
 };

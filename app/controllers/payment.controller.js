@@ -106,123 +106,6 @@ exports.createPayment = async (req, res) => {
     }
 };
 
-exports.refundPayment = async (req, res) => {
-    try {
-        const { appointmentId, reason } = req.body;
-        const userId = req.user ? req.user.id : null;
-
-        // Validate inputs
-        if (!appointmentId) {
-            return sendResponse(res, false, 'Appointment ID is required', null, 400);
-        }
-        if (!userId) {
-            return sendResponse(res, false, 'User authentication required', null, 401);
-        }
-
-        // Fetch the appointment
-        const appointment = await db.Appointment.findByPk(appointmentId, {
-            include: [{ model: db.Payment, as: 'Payment' }],
-        });
-        if (!appointment) {
-            return sendResponse(res, false, 'Appointment not found', null, 404);
-        }
-
-        // Fetch the associated payment
-        const payment = appointment.Payment;
-        if (!payment || !payment.paymentIntentId) {
-            return sendResponse(res, false, 'No payment found or payment not processed via Stripe', null, 400);
-        }
-
-        // Check if payment is eligible for refund
-        if (payment.paymentStatus !== 'Success') {
-            return sendResponse(res, false, 'Payment is not in a refundable state', null, 400);
-        }
-
-        // Check if already refunded
-        if (payment.refundId) {
-            return sendResponse(res, false, 'Payment has already been refunded', null, 400);
-        }
-
-        // Calculate refund amount (full refund for simplicity; adjust if partial refunds are needed)
-        const refundAmountInCents = Math.round(payment.totalAmount * 100);
-
-        // Create refund via Stripe
-        const refund = await stripe.refunds.create({
-            payment_intent: payment.paymentIntentId,
-            amount: refundAmountInCents, // Full refund; remove or adjust for partial refund
-            reason: reason || 'requested_by_customer', // Stripe accepts specific reasons
-            metadata: {
-                user_id: userId.toString(),
-                appointment_id: appointmentId.toString(),
-            },
-        });
-
-        // Update Payment record with refund details
-        await payment.update({
-            paymentStatus: 'Refunded',
-            refundId: refund.id,
-            refundReason: reason || 'Customer requested refund',
-            refundedAt: new Date(),
-        });
-
-        // Update Appointment status (e.g., mark as canceled)
-        await appointment.update({
-            status: 'canceled',
-            cancel_time: new Date(),
-            paymentStatus: 'Refunded',
-        });
-
-        // Fetch related data for notifications
-        const barber = await db.Barber.findByPk(appointment.BarberId);
-        const salon = await db.Salon.findByPk(appointment.SalonId);
-        const user = await db.USER.findOne({ where: { id: userId }, attributes: ['email'] });
-
-        // Prepare email data for refund confirmation
-        const emailData = {
-            customer_name: appointment.name,
-            barber_name: barber ? barber.name : 'N/A',
-            salon_name: salon ? salon.name : 'N/A',
-            appointment_date: appointment.appointment_date || new Date().toLocaleDateString(),
-            refund_amount: payment.totalAmount,
-            refund_id: refund.id,
-            reason: reason || 'Customer requested',
-            email_subject: 'Refund Confirmation',
-        };
-
-        // Send refund confirmation email
-        if (user && user.email) {
-            await sendEmail(
-                user.email,
-                "Your Refund Has Been Processed",
-                INVITE_BOOKING_APPOINTMENT_TEMPLATE_ID, // Reuse or create a new template ID
-                emailData
-            );
-        }
-
-        // Send SMS notification
-        if (appointment.mobile_number) {
-            const message = `Dear ${appointment.name}, your refund of $${payment.totalAmount} for your appointment at ${salon ? salon.name : 'the salon'} has been processed. Refund ID: ${refund.id}.`;
-            await sendSMS(appointment.mobile_number, message);
-        }
-
-        // Broadcast updates if applicable (e.g., for walk-ins)
-        if (barber && barber.category === BarberCategoryENUM.ForWalkIn) {
-            const updatedAppointments = await getAppointmentsByRoleExp(false);
-            if (updatedAppointments) broadcastBoardUpdates(updatedAppointments);
-        }
-
-        return sendResponse(res, true, 'Refund processed successfully', {
-            refundId: refund.id,
-            amount: payment.totalAmount,
-            appointmentId: appointment.id,
-        }, 200);
-
-    } catch (error) {
-        console.error('Error processing refund:', error);
-        return sendResponse(res, false, error.message || 'Failed to process refund', null, 500);
-    }
-};
-
 
 exports.handleWebhook = async (req, res) => {
     const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
@@ -242,10 +125,16 @@ exports.handleWebhook = async (req, res) => {
     }
 
     const handleRefundUpdates = async (refund, paymentIntentId) => {
-        const payment = await Payment.findOne({ where: { paymentIntentId } });
+        let payment = await Payment.findOne({ where: { paymentIntentId } });
         if (!payment) {
             console.error('Payment not found for refund:', paymentIntentId);
-            return;
+            payment = await Payment.create({
+                paymentIntentId,
+                paymentStatus: 'Failed', // Initial status before refund
+                UserId: refund.metadata?.user_id || null, // Optional, if available
+                totalAmount: refund.amount / 100, // Amount in dollars
+                paymentMethod: PaymentMethodENUM.Pay_Online,
+            });
         }
 
         const paymentStatus = refund.status === 'succeeded' ? 'Refunded' : refund.status === 'failed' ? 'Failed' : 'Pending';
@@ -368,8 +257,28 @@ exports.handleWebhook = async (req, res) => {
         }
 
         case 'payment_intent.payment_failed': {
-            console.error('PaymentIntent failed:', event.data.object);
-            return res.json({ received: true });
+            const paymentIntent = event.data.object;
+            console.log('PaymentIntent failed:', paymentIntent);
+
+            // Check if any amount was charged (e.g., authorization hold) that needs refunding
+            if (paymentIntent.amount_received > 0) {
+                try {
+                const refund = await stripe.refunds.create({
+                    payment_intent: paymentIntent.id,
+                    reason: 'payment_failed',
+                });
+                console.log('Refund initiated for failed payment:', refund);
+                await handleRefundUpdates(refund, paymentIntent.id);
+                return res.json({ received: true, message: 'Payment failed, refund initiated' });
+                } catch (refundError) {
+                console.error('Error initiating refund for failed payment:', refundError);
+                return res.json({ received: true, error: 'Payment failed, refund could not be initiated' });
+                }
+            } else {
+                // No amount was charged, just log failure
+                console.log('No refund needed, payment failed with no charge.');
+                return res.json({ received: true, message: 'Payment failed, no refund needed' });
+            }
         }
 
         case 'refund.created': {
@@ -389,5 +298,25 @@ exports.handleWebhook = async (req, res) => {
         default:
             console.log(`Unhandled event type: ${event.type}`);
             return res.json({ received: true });
+    }
+};
+
+
+exports.checkPaymentStatus = async (req, res) => {
+    const { paymentIntentId } = req.params;
+  
+    try {
+      const payment = await Payment.findOne({ where: { paymentIntentId } });
+      
+      if (!payment) {
+        // Payment not yet created by webhook, still processing
+        return sendResponse(res, true, 'Payment still processing', { status: 'Pending' }, 200);
+      }
+
+      // Check payment status
+      return sendResponse(res, true, 'Payment status retrieved', { status: payment.paymentStatus }, 200);
+    } catch (error) {
+      console.error('Error checking payment status:', error);
+      return sendResponse(res, false, 'Failed to check payment status', null, 500);
     }
 };
