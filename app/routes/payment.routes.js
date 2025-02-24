@@ -364,6 +364,6 @@ module.exports = (app) => {
  *                   type: null
  *                   example: null
  */
-  app.get(`${apiPrefix}/check-payment-status`, paymentController.checkPaymentStatus);
+  app.get(`${apiPrefix}/check-payment-status/:paymentIntentId`, paymentController.checkPaymentStatus);
 
 };
