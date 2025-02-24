@@ -1544,7 +1544,7 @@ exports.findOne = async (req, res) => {
         if (!appointment) {
             return sendResponse(res, false, "Appointment not found", null, 404);
         }
-        if (appointment) {
+       
             // Manually fetch associated services
             const appointmentServices = await AppointmentService.findAll({
                 where: {
@@ -1571,7 +1571,26 @@ exports.findOne = async (req, res) => {
         
             // Add services to appointment object
             appointment.dataValues.Services = services;
-        }
+
+            // Fetch payment details for this appointment using appointmentId
+            const payment = await Payment.findOne({
+                where: { appointmentId: appointment.id },
+                attributes: { exclude: ['createdAt', 'updatedAt', 'deletedAt'] }, // Exclude unnecessary fields
+            });
+
+            // Prepare payment details (if payment exists)
+            const paymentDetails = payment ? {
+                id: payment.id,
+                amount: payment.amount,
+                tip: payment.tip,
+                tax: payment.tax,
+                discount: payment.discount,
+                totalAmount: payment.totalAmount,
+                currency: payment.currency,
+                paymentStatus: payment.paymentStatus,
+                // Include other payment fields as needed
+            } : null;
+     
 
         // Additional logic for customers: Check if the salon is liked
         let isLike = false;
@@ -1588,6 +1607,8 @@ exports.findOne = async (req, res) => {
 
         return sendResponse(res, true, "Fetched appointment successfully", {
             ...appointment.toJSON(),
+            Service: services,
+            payment: paymentDetails, // Add payment details (or null if no payment exists)
             is_like: isLike,
         }, 200);
     } catch (error) {
