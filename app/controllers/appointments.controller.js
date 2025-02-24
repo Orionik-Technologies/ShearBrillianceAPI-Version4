@@ -1607,6 +1607,7 @@ exports.findAppointmentUser = async (req, res) => {
             return sendResponse(res, false, "Token is required", null, 400);
         }
 
+        // Fetch appointments for the user
         const appointments = await Appointment.findAll({
             where: {
                 UserId: userId,
@@ -1634,8 +1635,8 @@ exports.findAppointmentUser = async (req, res) => {
             ],
         });
 
-        // Map over the appointments to add the `type` and `category` fields
-        const appointmentsWithType = appointments.map((appointment) => {
+        // Fetch payment details for each appointment using appointmentId
+        const appointmentsWithPayments = await Promise.all(appointments.map(async (appointment) => {
             let category = '';
 
             // Determine category based on BarberCategoryENUM
@@ -1645,18 +1646,35 @@ exports.findAppointmentUser = async (req, res) => {
                 category = 'Checked in';
             }
 
+            // Fetch payment for this appointment using appointmentId
+            const payment = await Payment.findOne({
+                where: { appointmentId: appointment.id },
+                attributes: { exclude: ['createdAt', 'updatedAt', 'deletedAt'] }, // Exclude unnecessary fields
+            });
+
+            // Prepare payment details (if payment exists)
+            const paymentDetails = payment ? {
+                id: payment.id,
+                amount: payment.amount,
+                tip: payment.tip,
+                tax: payment.tax,
+                discount: payment.discount,
+                totalAmount: payment.totalAmount,
+                currency: payment.currency,
+                paymentStatus: payment.paymentStatus,
+                // Include other payment fields as needed
+            } : null;
+
             return {
                 ...appointment.toJSON(), // Convert Sequelize instance to plain object
                 category,
+                payment: paymentDetails, // Add payment details (or null if no payment exists)
             };
-        });
+        }));
 
-        if (!appointments.length) {
-            return sendResponse(res, true, "No appointments found for this user", null, 200);
-        } else {
-            return sendResponse(res, true, 'Fetched appointments successfully', appointmentsWithType, 200);
-        }
+        return sendResponse(res, true, 'Fetched appointments successfully', appointmentsWithPayments, 200);
     } catch (error) {
+        console.error('Error fetching appointments:', error.stack || error.message); // Log full error for debugging
         return sendResponse(res, false, error.message || 'Internal server error', null, 500);
     }
 };

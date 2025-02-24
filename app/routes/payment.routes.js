@@ -189,6 +189,7 @@ module.exports = (app) => {
    *                   type: string
    *                   example: "Failed to create payment intent"
    */
+  
   app.post(`${apiPrefix}/create`, paymentController.createPayment);
 
   /**
@@ -288,71 +289,81 @@ module.exports = (app) => {
   );
 
   /**
-   * @swagger
-   * /api/payment/check-payment-status/{paymentIntentId}:
-   *   Post:
-   *     summary: Check Payment Status
-   *     description: Retrieves the status of a payment based on the paymentIntentId.
-   *     parameters:
-   *       - name: paymentIntentId
-   *         in: path
-   *         required: true
-   *         schema:
-   *           type: string
-   *         description: The unique identifier for the payment intent.
-   *     responses:
-   *       200:
-   *         description: Payment status retrieved successfully.
-   *         content:
-   *           application/json:
-   *             schema:
-   *               type: object
-   *               properties:
-   *                 success:
-   *                   type: boolean
-   *                   example: true
-   *                 message:
-   *                   type: string
-   *                   example: Payment status retrieved
-   *                 data:
-   *                   type: object
-   *                   properties:
-   *                     status:
-   *                       type: string
-   *                       example: "Succeeded"
-   *       404:
-   *         description: Payment still processing or not found.
-   *         content:
-   *           application/json:
-   *             schema:
-   *               type: object
-   *               properties:
-   *                 success:
-   *                   type: boolean
-   *                   example: true
-   *                 message:
-   *                   type: string
-   *                   example: Payment still processing
-   *                 data:
-   *                   type: object
-   *                   properties:
-   *                     status:
-   *                       type: string
-   *                       example: "Pending"
-   *       500:
-   *         description: Server error occurred.
-   *         content:
-   *           application/json:
-   *             schema:
-   *               type: object
-   *               properties:
-   *                 success:
-   *                   type: boolean
-   *                   example: false
-   *                 message:
-   *                   type: string
-   *                   example: Failed to check payment status
-   */
-   app.post(`${apiPrefix}/check-payment-status`, paymentController.checkPaymentStatus);
+ * @swagger
+ * /api/payment/check-payment-status/{paymentIntentId}:
+ *   post:
+ *     summary: Check the status of a payment
+ *     description: Retrieves the current status of a payment based on its paymentIntentId
+ *     tags:
+ *       - Payments
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: paymentIntentId
+ *         required: true
+ *         schema:
+ *           type: string
+ *           example: "pi_1234567890"
+ *         description: The ID of the payment intent to check
+ *     responses:
+ *       200:
+ *         description: Payment status retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Payment status retrieved"
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     status:
+ *                       type: string
+ *                       example: "Pending"
+ *                       description: The current status of the payment (e.g., Pending, Success, Failed)
+ *       200_processing:
+ *         description: Payment is still processing
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Payment still processing"
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     status:
+ *                       type: string
+ *                       example: "Pending"
+ *                       description: Indicates the payment is still being processed
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Failed to check payment status"
+ *                 data:
+ *                   type: null
+ *                   example: null
+ */
+  app.post(`${apiPrefix}/check-payment-status`, paymentController.checkPaymentStatus);
 
 };
