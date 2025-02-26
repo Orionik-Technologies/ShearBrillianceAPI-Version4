@@ -1578,6 +1578,25 @@ exports.findOne = async (req, res) => {
                 attributes: { exclude: ['createdAt', 'updatedAt', 'deletedAt'] }, // Exclude unnecessary fields
             });
 
+            // Initialize receiptUrl
+            let receiptUrl = null;
+
+            // Get receipt URL if payment exists
+            if (payment) {
+                try {
+                    const paymentIntent = await stripe.paymentIntents.retrieve(payment.paymentIntentId);
+                    receiptUrl = paymentIntent.charges?.data[0]?.receipt_url;
+
+                    // If not found in charges array, fetch from latest_charge
+                    if (!receiptUrl && paymentIntent.latest_charge) {
+                        const charge = await stripe.charges.retrieve(paymentIntent.latest_charge);
+                        receiptUrl = charge.receipt_url;
+                    }
+                } catch (error) {
+                    console.error(`Error retrieving receipt URL for payment ${payment.id}:`, error);
+                }
+            }
+
             // Prepare payment details (if payment exists)
             const paymentDetails = payment ? {
                 id: payment.id,
@@ -1588,22 +1607,22 @@ exports.findOne = async (req, res) => {
                 totalAmount: payment.totalAmount,
                 currency: payment.currency,
                 paymentStatus: payment.paymentStatus,
-                // Include other payment fields as needed
+                receiptUrl: receiptUrl, // Add the receipt URL here
             } : null;
      
 
-        // Additional logic for customers: Check if the salon is liked
-        let isLike = false;
-        if (userRole === role.CUSTOMER) {
-            const favoriteSalon = await FavoriteSalon.findOne({
-                where: {
-                    UserId: userId,
-                    SalonId: appointment.SalonId,
-                    status: "like",
-                },
-            });
-            isLike = !!favoriteSalon;
-        }
+            // Additional logic for customers: Check if the salon is liked
+            let isLike = false;
+            if (userRole === role.CUSTOMER) {
+                const favoriteSalon = await FavoriteSalon.findOne({
+                    where: {
+                        UserId: userId,
+                        SalonId: appointment.SalonId,
+                        status: "like",
+                    },
+                });
+                isLike = !!favoriteSalon;
+            }
 
         return sendResponse(res, true, "Fetched appointment successfully", {
             ...appointment.toJSON(),
@@ -1673,6 +1692,25 @@ exports.findAppointmentUser = async (req, res) => {
                 attributes: { exclude: ['createdAt', 'updatedAt', 'deletedAt'] }, // Exclude unnecessary fields
             });
 
+            // Initialize receiptUrl
+            let receiptUrl = null;
+
+            // Get receipt URL if payment exists
+            if (payment) {
+                try {
+                    const paymentIntent = await stripe.paymentIntents.retrieve(payment.paymentIntentId);
+                    receiptUrl = paymentIntent.charges?.data[0]?.receipt_url;
+
+                    // If not found in charges array, fetch from latest_charge
+                    if (!receiptUrl && paymentIntent.latest_charge) {
+                        const charge = await stripe.charges.retrieve(paymentIntent.latest_charge);
+                        receiptUrl = charge.receipt_url;
+                    }
+                } catch (error) {
+                    console.error(`Error retrieving receipt URL for payment ${payment.id}:`, error);
+                }
+            }
+
             // Prepare payment details (if payment exists)
             const paymentDetails = payment ? {
                 id: payment.id,
@@ -1683,7 +1721,7 @@ exports.findAppointmentUser = async (req, res) => {
                 totalAmount: payment.totalAmount,
                 currency: payment.currency,
                 paymentStatus: payment.paymentStatus,
-                // Include other payment fields as needed
+                receiptUrl: receiptUrl, // Add the receipt URL here
             } : null;
 
             return {
