@@ -11,7 +11,7 @@ const { sendMessageToUser } = require('./socket.controller');
 const { sendSMS } = require('../services/smsService');
 const { BarberCategoryENUM } = require('../config/barberCategory.config');
 const { broadcastBoardUpdates } = require('../controllers/socket.controller');
-const {  getAppointmentsByRoleExp, handleBarberCategoryLogicExp, prepareEmailDataExp, sendAppointmentNotificationsExp, fetchAppointmentWithServicesExp, validateAndAttachServicesExp } = require('../controllers/appointments.controller');
+const {  getAppointmentsByRoleForAdminExp, handleBarberCategoryLogicExp, prepareEmailDataExp, sendAppointmentNotificationsExp, fetchAppointmentWithServicesExp, validateAndAttachServicesExp } = require('../controllers/appointments.controller');
 
 
 
@@ -137,7 +137,7 @@ exports.handleWebhook = async (req, res) => {
             });
         }
 
-        const paymentStatus = refund.status === 'succeeded' ? 'Refunded' : refund.status === 'failed' ? 'Failed' : 'Pending';
+        const paymentStatus = refund.status === 'succeeded' ? 'Refunded' : refund.status === 'failed' ? 'Failed' : 'Processing';
         await payment.update({
             paymentStatus,
             refundId: refund.id,
@@ -232,7 +232,7 @@ exports.handleWebhook = async (req, res) => {
                 await sendAppointmentNotificationsExp(appointment, appointmentData.name, appointmentData.mobile_number, userId, appointmentData.SalonId);
 
                 if (barber?.category === BarberCategoryENUM.ForWalkIn) {
-                    const updatedAppointments = await getAppointmentsByRoleExp(false);
+                    const updatedAppointments = await getAppointmentsByRoleForAdminExp(false);
                     if (updatedAppointments) broadcastBoardUpdates(updatedAppointments);
                 }
 

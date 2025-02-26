@@ -577,6 +577,21 @@ exports.create = async (req, res) => {
             attributes: ['id', 'default_service_time', 'min_price'],
         });
 
+        // Fetch barber-specific service prices
+        const barberServices = await db.BarberService.findAll({
+            where: {
+                BarberId: barber_id,
+                ServiceId: { [db.Sequelize.Op.in]: [...new Set(service_ids)] },
+            },
+            attributes: ['ServiceId', 'price'],
+        });
+
+        // Create a map of barber-specific prices for quick lookup
+        const barberServicePriceMap = barberServices.reduce((map, bs) => {
+            map[bs.ServiceId] = Number(bs.price);
+            return map;
+        }, {});
+
         // Create a frequency map of service_ids
         const serviceFrequency = service_ids.reduce((freq, id) => {
             freq[id] = (freq[id] || 0) + 1;
@@ -590,9 +605,14 @@ exports.create = async (req, res) => {
         }, 0);
 
 
+        // Calculate total service cost, prioritizing barber-specific price over min_price
         const totalServiceCost = services.reduce((sum, service) => {
             const frequency = serviceFrequency[service.id] || 0;
-            return sum + (Number(service.min_price) * frequency);
+            // Use barber-specific price if available, otherwise fall back to min_price
+            const servicePrice = barberServicePriceMap[service.id] !== undefined 
+                ? barberServicePriceMap[service.id] 
+                : Number(service.min_price);
+            return sum + (servicePrice * frequency);
         }, 0);
 
         const tax = parseFloat((totalServiceCost * 0.13).toFixed(2)); // 13% tax
@@ -1030,6 +1050,40 @@ exports.cancel = async (req, res) => {
             }
         }
 
+        // Check if payment mode is Pay_Online and initiate refund
+        if (appointment.paymentMode === PaymentMethodENUM.Pay_Online && appointment.stripePaymentIntentId) {
+            const payment = await Payment.findOne({ where: { appointmentId: appointment.id } });
+            if (payment && payment.paymentStatus === 'Success') {
+                try {
+                    const refund = await stripe.refunds.create({
+                        payment_intent: appointment.stripePaymentIntentId,
+                        reason: 'requested_by_customer',
+                        metadata: {
+                            appointmentId: appointment.id.toString(),
+                            userId: appointment.UserId.toString(),
+                        },
+                    });
+
+                    // Update Payment table immediately with refund initiation
+                    await payment.update({
+                        paymentStatus: 'Processing', // Temporary status until webhook confirms
+                        refundId: refund.id,
+                        refundReason: 'requested_by_customer',
+                    });
+
+                    // Update Appointment table partially (status remains 'canceled' later)
+                    await appointment.update({
+                        paymentStatus: 'Processing',
+                    });
+
+                    console.log(`Refund initiated for Payment Intent ${appointment.stripePaymentIntentId}: Refund ID ${refund.id}`);
+                } catch (refundError) {
+                    console.error("Error initiating refund:", refundError);
+                    return sendResponse(res, false, "Failed to initiate refund", null, 500);
+                }
+            }
+        }
+
         // Update appointment status to canceled
         appointment.status = 'canceled';
         appointment.cancel_time = new Date();
@@ -1051,7 +1105,7 @@ exports.cancel = async (req, res) => {
         }
 
         // Fetch updated appointments and broadcast the updates
-        const updatedAppointments = await getAppointmentsByRole(false);
+        const updatedAppointments = await getAppointmentsByRoleForAdmin(false);
         if(updatedAppointments)
         broadcastBoardUpdates(updatedAppointments);
 
@@ -2076,6 +2130,8 @@ const getAppointmentsByRoleForAdmin = async (ischeckRole,user) => {
     return appointmentsWithHaircutDetails;
 };
 
+exports.getAppointmentsByRoleForAdminExp = getAppointmentsByRoleForAdmin;
+
 const getInSalonAppointmentsByRole = async (ischeckRole,user) => {
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
@@ -2277,6 +2333,21 @@ exports.appointmentByBarber = async (req, res) => {
             attributes: ['default_service_time']
         });
 
+        // Fetch barber-specific service prices
+        const barberServices = await db.BarberService.findAll({
+            where: {
+                BarberId: barber_id,
+                ServiceId: { [db.Sequelize.Op.in]: [...new Set(service_ids)] },
+            },
+            attributes: ['ServiceId', 'price'],
+        });
+
+        // Create a map of barber-specific prices for quick lookup
+        const barberServicePriceMap = barberServices.reduce((map, bs) => {
+            map[bs.ServiceId] = Number(bs.price);
+            return map;
+        }, {});
+
         const serviceFrequency = service_ids.reduce((freq, id) => {
             freq[id] = (freq[id] || 0) + 1;
             return freq;
@@ -2287,7 +2358,12 @@ exports.appointmentByBarber = async (req, res) => {
         }, 0);
 
         const totalServiceCost = services.reduce((sum, service) => {
-            return sum + (Number(service.min_price) * (serviceFrequency[service.id] || 0));
+            const frequency = serviceFrequency[service.id] || 0;
+            // Use barber-specific price if available, otherwise fall back to min_price
+            const servicePrice = barberServicePriceMap[service.id] !== undefined 
+                ? barberServicePriceMap[service.id] 
+                : Number(service.min_price);
+            return sum + (servicePrice * frequency);
         }, 0);
 
         const tax = parseFloat((totalServiceCost * 0.13).toFixed(2));

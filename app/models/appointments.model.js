@@ -99,7 +99,16 @@ module.exports = (sequelize, Sequelize) => {
             allowNull: true
         },
         paymentStatus: {
-            type: Sequelize.ENUM("Pending", "Success", "Failed"),
+            type: Sequelize.ENUM(
+                "Pending",
+                "Processing",
+                "Success",
+                "Failed",
+                "Refunded",
+                "Partially_Refunded",
+                "Disputed",
+                "Canceled"
+            ),
             defaultValue: "Pending"
         },
         paymentMode: {
