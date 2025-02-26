@@ -6,10 +6,11 @@ const AppointmentService = db.AppointmentService;
 const Service =db.Service;
 const User = db.USER;
 const UserSalon = db.UserSalon;
+const Payment = db.Payment;
 const { role } = require('../config/roles.config');
 const jwt = require('jsonwebtoken');
 const roles = db.roles;
-const { Op } = require('sequelize'); // Make sure you import Op from Sequelize for date comparisons
+const { Op, where } = require('sequelize'); // Make sure you import Op from Sequelize for date comparisons
 const moment = require('moment'); // You can use the moment library to easily work with dates
 const PDFDocument = require('pdfkit');
 const fs = require('fs');
@@ -49,6 +50,50 @@ exports.getDashboardData = async (req, res) => {
         // Step 3: Collect data based on role
         let data = {};
 
+        // Helper function to calculate payment totals without associations
+        const calculatePaymentTotals = async (appointmentWhereClause) => {
+            // First get appointments
+            const appointments = await Appointment.findAll({
+                where: appointmentWhereClause,
+                attributes: ['id', 'paymentMode']
+            });
+
+            // Get all appointment IDs
+            const appointmentIds = appointments.map(appointment => appointment.id);
+
+            // Fetch corresponding payments using appointmentId
+            const payments = await Payment.findAll({
+                where: {
+                    appointmentId: { [Op.in]: appointmentIds },
+                    paymentStatus: 'Success' // Only successful payments
+                },
+                attributes: ['appointmentId', 'totalAmount']
+            });
+
+            // Create a map of payments by appointmentId for efficient lookup
+            const paymentMap = payments.reduce((map, payment) => {
+                map[payment.appointmentId] = payment.totalAmount;
+                return map;
+            }, {});
+
+            // Calculate totals using appointments and payment map
+            const totals = appointments.reduce((acc, appointment) => {
+                const totalAmount = paymentMap[appointment.id];
+                if (totalAmount) {
+                    if (appointment.paymentMode === 'Pay_Online') {
+                        acc.online += parseFloat(totalAmount) || 0;
+                    } else if (appointment.paymentMode === 'Pay_In_Person') {
+                        acc.offline += parseFloat(totalAmount) || 0;
+                    }
+                    acc.total += parseFloat(totalAmount) || 0;
+                }
+                return acc;
+            }, { online: 0, offline: 0, total: 0 });
+
+            return totals;
+        };
+
+        
         if (userRole === role.ADMIN) {
             // Admin specific data
             const customerRole = await db.roles.findOne({ where: { role_name: role.CUSTOMER } });
@@ -145,6 +190,8 @@ exports.getDashboardData = async (req, res) => {
                 };
             });
 
+            const paymentTotals = await calculatePaymentTotals({});
+
             data = {
                
                 // totalAdmins: await User.count({ where: { RoleId: adminRole.id } }),
@@ -164,7 +211,12 @@ exports.getDashboardData = async (req, res) => {
                 totalService : await Service.count(),
                 topSalonsWithDetails,
                 topBarbersWithDetails,
-                topServicesWithDetails
+                topServicesWithDetails,
+                revenue: {
+                    online: paymentTotals.online,
+                    offline: paymentTotals.offline,
+                    total: paymentTotals.total
+                }
            
             };
 
@@ -174,15 +226,18 @@ exports.getDashboardData = async (req, res) => {
             let salonOwnerSalons = [];
             if(userRole == role.SALON_OWNER){
                 // Salon Owner specific data
-             salonOwnerSalons = await Salon.findAll({ where: { UserId: userId } });
+                salonOwnerSalons = await Salon.findAll({ where: { UserId: userId } });
 
-            if (salonOwnerSalons.length === 0) {
-                return res.status(404).json({ success: false, message: 'No salons found for this role' });
-            } 
+                if (salonOwnerSalons.length === 0) {
+                    return res.status(404).json({ success: false, message: 'No salons found for this role' });
+                } 
             }
             else{
                 salonOwnerSalons = await Salon.findAll({ where: { id: req.user.salonId } });
             }
+
+            const salonIds = salonOwnerSalons.map(salon => salon.id);
+            const paymentTotals = await calculatePaymentTotals({ SalonId: salonIds });
 
             // Collecting active appointments for the owned salons (only 'in_salon' status)
             const activeAppointmentsCount = await Appointment.count({
@@ -252,6 +307,7 @@ exports.getDashboardData = async (req, res) => {
                 }
             });
 
+        
             data = {
                 totalBarbers,
                 totalCustomers,
@@ -261,7 +317,12 @@ exports.getDashboardData = async (req, res) => {
                 completedAppointmentsCount,
                 completedWalkInCount,
                 canceledAppointmentsCount,
-                pendingFutureAppointmentsCount
+                pendingFutureAppointmentsCount,
+                revenue: {
+                    online: paymentTotals.online,
+                    offline: paymentTotals.offline,
+                    total: paymentTotals.total
+                }
             };
 
         } else if (userRole === role.SALON_MANAGER) {
@@ -279,6 +340,7 @@ exports.getDashboardData = async (req, res) => {
              }
          
              const salonId = salonRole.id;
+             const paymentTotals = await calculatePaymentTotals({ SalonId: salonId });
          
              // Fetch active appointments for the managed salon
              const activeAppointmentsCount = await Appointment.count({
@@ -363,7 +425,12 @@ exports.getDashboardData = async (req, res) => {
                      name: salonRole.name,
                      address: salonRole.address,
                      city: salonRole.city,
-                 },
+                },
+                 revenue: {
+                    online: paymentTotals.online,
+                    offline: paymentTotals.offline,
+                    total: paymentTotals.total
+                },
              };
         } 
         else if (userRole === role.BARBER) {
@@ -373,6 +440,8 @@ exports.getDashboardData = async (req, res) => {
             if (!barber) {
                 return res.status(404).json({ success: false, message: 'Barber not found' });
             }
+
+            const paymentTotals = await calculatePaymentTotals({ BarberId: barber.id });
 
             // Fetch active appointments for the barber (only 'in_salon' status)
             const activeAppointmentsCount = await Appointment.count({
@@ -410,7 +479,12 @@ exports.getDashboardData = async (req, res) => {
                 completedAppointmentsCount,
                 completedWalkInCount,
                 canceledAppointmentsCount,
-                pendingFutureAppointmentsCount
+                pendingFutureAppointmentsCount,
+                revenue: {
+                    online: paymentTotals.online,
+                    offline: paymentTotals.offline,
+                    total: paymentTotals.total
+                }
             };
 
         } else {
