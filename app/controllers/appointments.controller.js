@@ -926,6 +926,40 @@ exports.updateStatus = async (req, res) => {
 
         }
 
+        // Initiate refund if payment mode is Pay_Online
+        if (appointment.paymentMode === PaymentMethodENUM.Pay_Online && appointment.stripePaymentIntentId) {
+            const payment = await Payment.findOne({ where: { appointmentId: appointment.id } });
+            if (payment && payment.paymentStatus === 'Success') {
+                try {
+                    const refund = await stripe.refunds.create({
+                        payment_intent: appointment.stripePaymentIntentId,
+                        reason: 'requested_by_customer',
+                        metadata: {
+                            appointmentId: appointment.id.toString(),
+                            userId: appointment.UserId.toString(),
+                        },
+                    });
+
+                    // Update Payment table immediately with refund initiation
+                    await payment.update({
+                        paymentStatus: 'Processing',
+                        refundId: refund.id,
+                        refundReason: 'requested_by_customer',
+                    });
+
+                    // Update Appointment table with processing status
+                    await appointment.update({
+                        paymentStatus: 'Processing',
+                    });
+
+                    console.log(`Refund initiated for Payment Intent ${appointment.stripePaymentIntentId}: Refund ID ${refund.id}`);
+                } catch (refundError) {
+                    console.error("Error initiating refund:", refundError);
+                    return sendResponse(res, false, "Failed to initiate refund", null, 500);
+                }
+            }
+        }
+
         // Send cancellation notification
         const fcmTokens = await FcmToken.findAll({ where: { UserId: appointment.UserId } });
         if (fcmTokens.length > 0) {
