@@ -376,8 +376,13 @@ async function handleBarberCategoryLogic(barber, user_id, totalServiceTime, appo
             const activeAppointment = await db.Appointment.findOne({
                 where: { UserId: user_id, status: [AppointmentENUM.Checked_in, AppointmentENUM.In_salon] }
             });
-            if (activeAppointment) {
-                throw new Error("You already have an active appointment. Please complete or cancel it before booking a new one.");
+
+            // if (activeAppointment) {
+            //     throw new Error("You already have an active appointment. Please complete or cancel it before booking a new one.");
+            // }
+
+            if(activeAppointment) {
+                return sendResponse(res, false, "You already have an active appointment. Please complete or cancel it before booking a new one.", null, 400);
             }
 
             // Retrieve the barber session
@@ -2009,6 +2014,68 @@ const getAppointmentsByRole = async (ischeckRole,user) => {
         return appointmentsWithHaircutDetails;
 };
 
+const getAppointmentsByRoleForAdmin = async (ischeckRole,user) => {
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    
+    const endOfToday = new Date();
+    endOfToday.setHours(23, 59, 59, 999);
+
+    let whereCondition = {
+        createdAt: {
+            [Op.between]: [startOfToday, endOfToday]
+        },
+        status: [AppointmentENUM.Checked_in,AppointmentENUM.In_salon,AppointmentENUM.Completed,AppointmentENUM.Canceled]
+    };
+
+    if(ischeckRole){
+        if(user.role === role.BARBER){
+            whereCondition.BarberId = user.barberId;
+        }else if(user.role === role.SALON_OWNER || user.role === role.SALON_MANAGER){
+            whereCondition.SalonId = user.salonId;
+        }
+    }
+
+    // Add condition to only fetch appointments where the barber category is 'walk_in' (category 2)
+    whereCondition['$Barber.category$'] = BarberCategoryENUM.ForWalkIn;
+
+
+     // Fetch appointments
+    const appointments = await Appointment.findAll({
+        where: whereCondition,
+        attributes: ['id', 'number_of_people', 'status', 'estimated_wait_time', 'queue_position', 'mobile_number', 'name', 'check_in_time', 'in_salon_time', 'complete_time', 'cancel_time', 'BarberId','SalonId'],
+        include: [
+            { model: User, as: 'User', attributes: ['id','firstname','lastname', 'profile_photo'] },
+            { model: Barber, as: 'Barber', attributes: ['name','background_color'] },
+            { model: Salon, as: 'salon', attributes: ['name'] },
+            { model: Service, attributes: ['id','name', 'default_service_time'] },
+        ],
+        order: [['check_in_time', 'ASC']] // Optional: order by check-in time
+    });
+
+    if (appointments.length === 0) {
+        return;
+    }
+
+    // Ensure each appointment's User is valid before attempting to access haircut details
+    const appointmentsWithHaircutDetails = await Promise.all(
+        appointments.map(async (appointment) => {
+            const userId = appointment.User ? appointment.User.id : null;
+
+            if (userId) {
+                const haircutDetails = await HaircutDetails.findAll({
+                    where: { UserId: userId },
+                });
+                appointment.dataValues.haircutDetails = haircutDetails;
+            }
+                
+            return appointment;
+        })
+    );
+
+    return appointmentsWithHaircutDetails;
+};
+
 const getInSalonAppointmentsByRole = async (ischeckRole,user) => {
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
@@ -2100,6 +2167,7 @@ exports.findInSalonUsers = async (req, res) => {
         return sendResponse(res, false, error.message || 'Failed to fetch appointments', null, 500);
     }
 };
+
 
 exports.appointmentByBarber = async (req, res) => {
     const {
@@ -2368,7 +2436,7 @@ exports.appointmentByBarber = async (req, res) => {
             }
 
             if (barber.category === BarberCategoryENUM.ForWalkIn) {
-                const updatedAppointments = await getAppointmentsByRole(false);
+                const updatedAppointments = await getAppointmentsByRoleForAdmin(false);
                 if (updatedAppointments)
                     broadcastBoardUpdates(updatedAppointments);
             }
