@@ -75,10 +75,6 @@ exports.createPayment = async (req, res) => {
         // Handle barber category logic (updates appointmentData with slot/appointment details)
         const finalAppointmentData = await handleBarberCategoryLogicExp(barber, user_id, totalServiceTime, updatedAppointmentData, appointmentData.SlotId);
 
-        if(!finalAppointmentData) {
-            return sendResponse(res, false, 'Failed to create appointment', null, 400);
-        }
-
         // Log appointmentData to debug
         console.log('Final Appointment Data:', finalAppointmentData);
 
