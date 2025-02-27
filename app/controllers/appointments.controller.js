@@ -1139,7 +1139,7 @@ exports.cancel = async (req, res) => {
         }
 
         // Fetch updated appointments and broadcast the updates
-        const updatedAppointments = await getAppointmentsByRoleForAdmin(false);
+        const updatedAppointments = await getAppointmentsByRole(false);
         if(updatedAppointments)
         broadcastBoardUpdates(updatedAppointments);
 
@@ -2057,44 +2057,7 @@ const getAppointmentsByRole = async (ischeckRole,user) => {
                     appointment.dataValues.haircutDetails = haircutDetails;
                 }
 
-                // Fetch payment details for this appointment using appointmentId
-                const payment = await Payment.findOne({
-                    where: { appointmentId: appointment.id },
-                    attributes: { exclude: ['createdAt', 'updatedAt', 'deletedAt'] }, // Exclude unnecessary fields
-                });
-
-                // Initialize receiptUrl
-                let receiptUrl = null;
-
-                if (payment) {
-                    try {
-                        const paymentIntent = await stripe.paymentIntents.retrieve(payment.paymentIntentId);
-                        receiptUrl = paymentIntent.charges?.data[0]?.receipt_url;
-
-                        // If not found in charges array, fetch from latest_charge
-                        if (!receiptUrl && paymentIntent.latest_charge) {
-                            const charge = await stripe.charges.retrieve(paymentIntent.latest_charge);
-                            receiptUrl = charge.receipt_url;
-                        }
-                    } catch (error) {
-                        console.error(`Error retrieving receipt URL for payment ${payment.id}:`, error);
-                    }
-                }
-
-                // Prepare payment details (if payment exists)
-                appointment.dataValues.paymentDetails = payment ? {
-                    id: payment.id,
-                    amount: payment.amount,
-                    tip: payment.tip,
-                    tax: payment.tax,
-                    discount: payment.discount,
-                    totalAmount: payment.totalAmount,
-                    currency: payment.currency,
-                    paymentStatus: payment.paymentStatus,
-                    receiptUrl: receiptUrl, // Include receipt URL here
-                } : null;
-
-                    
+                                    
                 return appointment;
             })
         );
@@ -2156,6 +2119,43 @@ const getAppointmentsByRoleForAdmin = async (ischeckRole,user) => {
                 });
                 appointment.dataValues.haircutDetails = haircutDetails;
             }
+
+            // Fetch payment details for this appointment using appointmentId
+            const payment = await Payment.findOne({
+                where: { appointmentId: appointment.id },
+                attributes: { exclude: ['createdAt', 'updatedAt', 'deletedAt'] }, // Exclude unnecessary fields
+            });
+
+            // Initialize receiptUrl
+            let receiptUrl = null;
+
+            if (payment) {
+                try {
+                    const paymentIntent = await stripe.paymentIntents.retrieve(payment.paymentIntentId);
+                    receiptUrl = paymentIntent.charges?.data[0]?.receipt_url;
+
+                    // If not found in charges array, fetch from latest_charge
+                    if (!receiptUrl && paymentIntent.latest_charge) {
+                        const charge = await stripe.charges.retrieve(paymentIntent.latest_charge);
+                        receiptUrl = charge.receipt_url;
+                    }
+                } catch (error) {
+                    console.error(`Error retrieving receipt URL for payment ${payment.id}:`, error);
+                }
+            }
+
+            // Prepare payment details (if payment exists)
+            appointment.dataValues.paymentDetails = payment ? {
+                id: payment.id,
+                amount: payment.amount,
+                tip: payment.tip,
+                tax: payment.tax,
+                discount: payment.discount,
+                totalAmount: payment.totalAmount,
+                currency: payment.currency,
+                paymentStatus: payment.paymentStatus,
+                receiptUrl: receiptUrl, // Include receipt URL here
+            } : null;
                 
             return appointment;
         })
@@ -2217,7 +2217,7 @@ exports.findAllBoardData = async (req, res) => {
         console.log("Authenticated user:", req.user);
 
              // Fetch appointments using the utility function
-        const appointments = await getAppointmentsByRole(true,req.user);
+        const appointments = await getAppointmentsByRoleForAdmin(true,req.user);
 
         if (!appointments || appointments.length === 0) {
             return sendResponse(res, true, "No appointments booked yet!", null, 200);
@@ -2546,7 +2546,7 @@ exports.appointmentByBarber = async (req, res) => {
             }
 
             if (barber.category === BarberCategoryENUM.ForWalkIn) {
-                const updatedAppointments = await getAppointmentsByRoleForAdmin(false);
+                const updatedAppointments = await getAppointmentsByRole(false);
                 if (updatedAppointments)
                     broadcastBoardUpdates(updatedAppointments);
             }

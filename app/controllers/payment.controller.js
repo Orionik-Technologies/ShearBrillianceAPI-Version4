@@ -11,7 +11,7 @@ const { sendMessageToUser } = require('./socket.controller');
 const { sendSMS } = require('../services/smsService');
 const { BarberCategoryENUM } = require('../config/barberCategory.config');
 const { broadcastBoardUpdates } = require('../controllers/socket.controller');
-const {  getAppointmentsByRoleForAdminExp, handleBarberCategoryLogicExp, prepareEmailDataExp, sendAppointmentNotificationsExp, fetchAppointmentWithServicesExp, validateAndAttachServicesExp } = require('../controllers/appointments.controller');
+const {  getAppointmentsByRoleExp, handleBarberCategoryLogicExp, prepareEmailDataExp, sendAppointmentNotificationsExp, fetchAppointmentWithServicesExp, validateAndAttachServicesExp } = require('../controllers/appointments.controller');
 
 
 
@@ -232,7 +232,7 @@ exports.handleWebhook = async (req, res) => {
                 await sendAppointmentNotificationsExp(appointment, appointmentData.name, appointmentData.mobile_number, userId, appointmentData.SalonId);
 
                 if (barber?.category === BarberCategoryENUM.ForWalkIn) {
-                    const updatedAppointments = await getAppointmentsByRoleForAdminExp(false);
+                    const updatedAppointments = await getAppointmentsByRoleExp(false);
                     if (updatedAppointments) broadcastBoardUpdates(updatedAppointments);
                 }
 
