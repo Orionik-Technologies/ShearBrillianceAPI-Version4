@@ -1,7 +1,7 @@
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const { end } = require('pdfkit');
 const sendResponse = require('../helpers/responseHelper'); // Import the helper function
-const isOnlinePaymentEnabled = require('../helpers/configurationHelper'); // Import the helper function
+const { isOnlinePaymentEnabled }= require('../helpers/configurationHelper'); // Import the helper function
 const db = require("../models");
 const { Payment, Appointment, Service } = require('../models'); // Adjust path as needed
 const { PaymentMethodENUM } = require('../config/paymentEnums.config');

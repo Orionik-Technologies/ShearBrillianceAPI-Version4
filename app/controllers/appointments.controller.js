@@ -699,8 +699,7 @@ exports.create = async (req, res) => {
 
             if(barber.category === BarberCategoryENUM.ForWalkIn) {
                 const updatedAppointments = await getAppointmentsByRole(false);
-                if(updatedAppointments)
-                broadcastBoardUpdates(updatedAppointments);
+                if(updatedAppointments) broadcastBoardUpdates(updatedAppointments);
             }
 
             // Send notifications
@@ -931,37 +930,54 @@ exports.updateStatus = async (req, res) => {
 
         }
 
+        const payment = await db.Payment.findOne({ where: { appointmentId: appointment.id } });
+
         // Initiate refund if payment mode is Pay_Online
-        if (appointment.paymentMode === PaymentMethodENUM.Pay_Online && appointment.stripePaymentIntentId) {
-            const payment = await Payment.findOne({ where: { appointmentId: appointment.id } });
-            if (payment && payment.paymentStatus === 'Success') {
-                try {
-                    const refund = await stripe.refunds.create({
-                        payment_intent: appointment.stripePaymentIntentId,
-                        reason: 'requested_by_customer',
-                        metadata: {
-                            appointmentId: appointment.id.toString(),
-                            userId: appointment.UserId.toString(),
-                        },
-                    });
+        if (payment) {
+            if (appointment.paymentMode === PaymentMethodENUM.Pay_Online && appointment.stripePaymentIntentId) {
+                if (payment.paymentStatus === 'Success') {
+                    try {
+                        const refund = await stripe.refunds.create({
+                            payment_intent: appointment.stripePaymentIntentId,
+                            reason: 'requested_by_customer',
+                            metadata: {
+                                appointmentId: appointment.id.toString(),
+                                userId: appointment.UserId.toString(),
+                            },
+                        });
 
-                    // Update Payment table immediately with refund initiation
+                        // Update Payment and Appointment to "Processing" during refund
+                        await payment.update({
+                            paymentStatus: 'Processing',
+                            refundId: refund.id,
+                            refundReason: 'requested_by_customer',
+                        });
+                        await appointment.update({
+                            paymentStatus: 'Processing',
+                        });
+
+                        console.log(`Refund initiated for Payment Intent ${appointment.stripePaymentIntentId}: Refund ID ${refund.id}`);
+                    } catch (refundError) {
+                        console.error("Error initiating refund:", refundError);
+                        return sendResponse(res, false, "Failed to initiate refund", null, 500);
+                    }
+                } else if (payment.paymentStatus === 'Pending') {
+                    // If payment was never completed, mark as "Canceled"
                     await payment.update({
-                        paymentStatus: 'Processing',
-                        refundId: refund.id,
-                        refundReason: 'requested_by_customer',
+                        paymentStatus: 'Canceled',
                     });
-
-                    // Update Appointment table with processing status
                     await appointment.update({
-                        paymentStatus: 'Processing',
+                        paymentStatus: 'Canceled',
                     });
-
-                    console.log(`Refund initiated for Payment Intent ${appointment.stripePaymentIntentId}: Refund ID ${refund.id}`);
-                } catch (refundError) {
-                    console.error("Error initiating refund:", refundError);
-                    return sendResponse(res, false, "Failed to initiate refund", null, 500);
                 }
+            } else {
+                // For Pay_In_Person or no Stripe payment, set to "Canceled"
+                await payment.update({
+                    paymentStatus: 'Canceled',
+                });
+                await appointment.update({
+                    paymentStatus: 'Canceled',
+                });
             }
         }
 
@@ -1054,6 +1070,8 @@ exports.cancel = async (req, res) => {
         const salon = await db.Salon.findOne({ where: { id: barber.SalonId } });
         const salonName = salon ? salon.name : 'the selected salon';
         const salonAddress = salon ? salon.address : 'the selected salon';
+        // Fetch the associated payment record
+        const payment = await db.Payment.findOne({ where: { appointmentId: appointment.id } });
 
 
         // For appointment-based barbers (category 1), release the slots
@@ -1089,37 +1107,53 @@ exports.cancel = async (req, res) => {
             }
         }
 
-        // Check if payment mode is Pay_Online and initiate refund
-        if (appointment.paymentMode === PaymentMethodENUM.Pay_Online && appointment.stripePaymentIntentId) {
-            const payment = await Payment.findOne({ where: { appointmentId: appointment.id } });
-            if (payment && payment.paymentStatus === 'Success') {
-                try {
-                    const refund = await stripe.refunds.create({
-                        payment_intent: appointment.stripePaymentIntentId,
-                        reason: 'requested_by_customer',
-                        metadata: {
-                            appointmentId: appointment.id.toString(),
-                            userId: appointment.UserId.toString(),
-                        },
-                    });
 
-                    // Update Payment table immediately with refund initiation
+        // Handle payment status based on payment mode
+        if (payment) {
+            if (appointment.paymentMode === PaymentMethodENUM.Pay_Online && appointment.stripePaymentIntentId) {
+                if (payment.paymentStatus === 'Success') {
+                    try {
+                        const refund = await stripe.refunds.create({
+                            payment_intent: appointment.stripePaymentIntentId,
+                            reason: 'requested_by_customer',
+                            metadata: {
+                                appointmentId: appointment.id.toString(),
+                                userId: appointment.UserId.toString(),
+                            },
+                        });
+
+                        // Update Payment and Appointment to "Processing" during refund
+                        await payment.update({
+                            paymentStatus: 'Processing',
+                            refundId: refund.id,
+                            refundReason: 'requested_by_customer',
+                        });
+                        await appointment.update({
+                            paymentStatus: 'Processing',
+                        });
+
+                        console.log(`Refund initiated for Payment Intent ${appointment.stripePaymentIntentId}: Refund ID ${refund.id}`);
+                    } catch (refundError) {
+                        console.error("Error initiating refund:", refundError);
+                        return sendResponse(res, false, "Failed to initiate refund", null, 500);
+                    }
+                } else if (payment.paymentStatus === 'Pending') {
+                    // If payment was never completed, mark as "Canceled"
                     await payment.update({
-                        paymentStatus: 'Processing', // Temporary status until webhook confirms
-                        refundId: refund.id,
-                        refundReason: 'requested_by_customer',
+                        paymentStatus: 'Canceled',
                     });
-
-                    // Update Appointment table partially (status remains 'canceled' later)
                     await appointment.update({
-                        paymentStatus: 'Processing',
+                        paymentStatus: 'Canceled',
                     });
-
-                    console.log(`Refund initiated for Payment Intent ${appointment.stripePaymentIntentId}: Refund ID ${refund.id}`);
-                } catch (refundError) {
-                    console.error("Error initiating refund:", refundError);
-                    return sendResponse(res, false, "Failed to initiate refund", null, 500);
                 }
+            } else {
+                // For Pay_In_Person or no Stripe payment, set to "Canceled"
+                await payment.update({
+                    paymentStatus: 'Canceled',
+                });
+                await appointment.update({
+                    paymentStatus: 'Canceled',
+                });
             }
         }
 
@@ -1149,9 +1183,6 @@ exports.cancel = async (req, res) => {
         broadcastBoardUpdates(updatedAppointments);
 
      
-     
-        
-
         // // Send email notification
         let emailData;
         if (user) {
