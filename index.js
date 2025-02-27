@@ -49,6 +49,12 @@ const syncDatabase = async () => {
   try {
     await db.sequelize.sync({  });
     console.log('Database synced successfully!');
+
+    // Seed initial Configuration data
+    await db.Configuration.findOrCreate({
+      where: { key: 'enable_online_payment' },
+      defaults: { value: true },
+    });
   } catch (error) {
     console.error('Error syncing database:', error);
   }
@@ -127,6 +133,7 @@ require('./app/routes/slot.routes')(app);
 require('./app/routes/transferAppointmentsOnLeave.routes')(app);
 require('./app/routes/payment.routes')(app);
 require('./app/routes/career.routes')(app);
+require('./app/routes/configurations.routes')(app);
 
 // // Initialize Socket.io and Controllers
 socketController.initialize(io); // Initialize the Socket.IO instance

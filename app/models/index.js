@@ -76,5 +76,7 @@ db.Career = require("./Career.model.js")(sequelize, Sequelize);
 
 db.Payment = require("./payment.model.js")(sequelize, Sequelize);
 
+db.Configuration = require("./configurations.model.js")(sequelize, Sequelize);
+
 
 module.exports = db;

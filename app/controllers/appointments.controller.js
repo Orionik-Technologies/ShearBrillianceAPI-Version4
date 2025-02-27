@@ -32,6 +32,7 @@ const { broadcastBoardUpdates } = require('../controllers/socket.controller');
 const { sendNotificationToUser } = require("../services/notificationService");
 const { INVITE_BOOKING_APPOINTMENT_TEMPLATE_ID } = require("../config/sendGridConfig");
 const {INVITE_CANCEL_APPOINTMENT_TEMPLATE_ID} =require("../config/sendGridConfig");
+const { isOnlinePaymentEnabled } = require('../helpers/configurationHelper');
 
 
 let io; // Declare io in the controller's scope
@@ -564,6 +565,14 @@ exports.create = async (req, res) => {
     try {
         let { user_id, salon_id, barber_id, number_of_people, name, mobile_number, service_ids, slot_id, payment_mode, tip } = req.body;
         user_id = req.user ? req.user.id : user_id;
+
+        // Check if online payment is enabled
+        const onlinePaymentEnabled = await isOnlinePaymentEnabled();
+
+        // Default to Pay_In_Person if online payment is disabled or payment_mode is invalid
+        if (!onlinePaymentEnabled || !Object.values(PaymentMethodENUM).includes(payment_mode)) {
+            payment_mode = PaymentMethodENUM.Pay_In_Person;
+        }
     
         // Get barber details including category
         const barber = await db.Barber.findByPk(barber_id);
@@ -635,7 +644,7 @@ exports.create = async (req, res) => {
         // Call the new function to handle barber category logic
         appointmentData = await handleBarberCategoryLogic(barber, user_id, totalServiceTime, appointmentData, slot_id);
 
-        if (payment_mode === PaymentMethodENUM.Pay_In_Person) {
+        if (payment_mode === PaymentMethodENUM.Pay_In_Person  || !onlinePaymentEnabled) {
             // For pay in person, create appointment with pending status
             appointmentData = {
                 ...appointmentData,
