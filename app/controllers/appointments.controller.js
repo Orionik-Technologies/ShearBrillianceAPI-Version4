@@ -1474,11 +1474,46 @@ exports.findAllAppointments = async (req, res) => {
             appointments.map(async (apt) => {
                 const userId = apt.User?.id;
                 let haircutDetails = [];
+                let paymentDetails = null;
                 
                 if (userId) {
                     haircutDetails = await HaircutDetails.findAll({
                         where: { UserId: userId }
                     });
+                }
+
+                // Fetch payment details
+                const payment = await Payment.findOne({
+                    where: { appointmentId: apt.id },
+                    attributes: { exclude: ['createdAt', 'updatedAt', 'deletedAt'] }
+                });
+
+                // Get receipt URL from Stripe if payment exists
+                let receiptUrl = null;
+                if (payment) {
+                    try {
+                        const paymentIntent = await stripe.paymentIntents.retrieve(payment.paymentIntentId);
+                        receiptUrl = paymentIntent.charges?.data[0]?.receipt_url;
+
+                        if (!receiptUrl && paymentIntent.latest_charge) {
+                            const charge = await stripe.charges.retrieve(paymentIntent.latest_charge);
+                            receiptUrl = charge.receipt_url;
+                        }
+                    } catch (error) {
+                        console.error(`Error retrieving receipt URL for payment ${payment.id}:`, error);
+                    }
+
+                    paymentDetails = {
+                        id: payment.id,
+                        amount: payment.amount,
+                        tip: payment.tip,
+                        tax: payment.tax,
+                        discount: payment.discount,
+                        totalAmount: payment.totalAmount,
+                        currency: payment.currency,
+                        paymentStatus: payment.paymentStatus,
+                        receiptUrl: receiptUrl
+                    };
                 }
 
                 return {
@@ -1511,7 +1546,8 @@ exports.findAllAppointments = async (req, res) => {
                         background_color: apt.Barber?.background_color
                     },
                     salon: apt.salon,
-                    haircutDetails: haircutDetails
+                    haircutDetails: haircutDetails,
+                    paymentDetails: paymentDetails
                 };
             })
         );
