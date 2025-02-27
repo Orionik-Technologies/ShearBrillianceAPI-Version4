@@ -11,4 +11,4 @@ const isOnlinePaymentEnabled = async () => {
     }
 };
 
-module.exports = isOnlinePaymentEnabled;
+module.exports = { isOnlinePaymentEnabled };

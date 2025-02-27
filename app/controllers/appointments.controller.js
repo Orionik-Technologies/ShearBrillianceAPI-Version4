@@ -378,12 +378,8 @@ async function handleBarberCategoryLogic(barber, user_id, totalServiceTime, appo
                 where: { UserId: user_id, status: [AppointmentENUM.Checked_in, AppointmentENUM.In_salon] }
             });
 
-            // if (activeAppointment) {
-            //     throw new Error("You already have an active appointment. Please complete or cancel it before booking a new one.");
-            // }
-
-            if(activeAppointment) {
-                return sendResponse(res, false, "You already have an active appointment. Please complete or cancel it before booking a new one.", null, 400);
+            if (activeAppointment) {
+                throw new Error("You already have an active appointment. Please complete or cancel it before booking a new one.");
             }
 
             // Retrieve the barber session
