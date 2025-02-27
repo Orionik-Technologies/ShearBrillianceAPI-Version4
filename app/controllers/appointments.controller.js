@@ -2434,10 +2434,15 @@ exports.appointmentByBarber = async (req, res) => {
             return sendResponse(res, false, "You already have an active appointment. Please complete or cancel it before booking a new one.", null, 400);
         }
 
-        const services = await Service.findAll({
-            where: { id: service_ids },
-            attributes: ['default_service_time']
+        // Fetch services with min_price included
+        const services = await db.Service.findAll({
+            where: { id: [...new Set(service_ids)] }, // Ensure unique IDs
+            attributes: ['id', 'default_service_time', 'min_price'] // Add min_price
         });
+
+        if (services.length === 0) {
+            return sendResponse(res, false, 'No valid services found for the provided service_ids', null, 400);
+        }
 
         // Fetch barber-specific service prices
         const barberServices = await db.BarberService.findAll({
@@ -2465,12 +2470,16 @@ exports.appointmentByBarber = async (req, res) => {
 
         const totalServiceCost = services.reduce((sum, service) => {
             const frequency = serviceFrequency[service.id] || 0;
-            // Use barber-specific price if available, otherwise fall back to min_price
             const servicePrice = barberServicePriceMap[service.id] !== undefined 
                 ? barberServicePriceMap[service.id] 
-                : Number(service.min_price);
+                : (service.min_price !== null && service.min_price !== undefined ? Number(service.min_price) : 0); // Fallback to 0 if no price
             return sum + (servicePrice * frequency);
         }, 0);
+
+        if (isNaN(totalServiceCost)) {
+            console.error('totalServiceCost is NaN. Check service prices:', { barberServicePriceMap, services });
+            return sendResponse(res, false, 'Unable to calculate service cost due to missing pricing data', null, 400);
+        }
 
         const tax = parseFloat((totalServiceCost * 0.13).toFixed(2));
         const validatedTip = isNaN(tip) ? 0 : Number(tip);
