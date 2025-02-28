@@ -652,12 +652,19 @@ exports.generateSalesReport = async (req, res) => {
             doc.fontSize(12).text('Date       | Appointments | Payment Mode       | Total Payment', { underline: true });
 
             salonData.dailyData.forEach(entry => {
+                let isFirstEntryForDate = true;
                 entry.details.forEach(detail => {
                     const appointmentsStr = String(detail.appointments).padEnd(12);
                     const paymentModeStr = detail.paymentMode === 'Pay_In_Person' ? 'Offline' : detail.paymentMode === 'Pay_Online' ? 'Online' : 'N/A';
-                    const paymentStr = entry.details.length === 1 ? `$${entry.totalPayment}` : '';
-                    doc.text(`${entry.date} |       ${appointmentsStr} | ${paymentModeStr} | ${paymentStr} | ${entry.totalPayment}`);
+                    
+                    // Show total payment only once per date
+                    const paymentStr = isFirstEntryForDate ? `$${entry.totalPayment}` : '';
+                
+                    doc.text(`${entry.date} |       ${appointmentsStr} |         ${paymentModeStr} |         ${paymentStr}`);
+                
+                    isFirstEntryForDate = false; // Ensure it prints only for the first row
                 });
+                
             });
             
 
