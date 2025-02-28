@@ -449,7 +449,7 @@ exports.getPaymentData = async (req, res) => {
 };
 
 exports.generateSalesReport = async (req, res) => {
-    const { filter } = req.query;
+    const { startDate, endDate } = req.query;
 
     try {
         const userId = req.user ? req.user.id : null;
@@ -465,11 +465,18 @@ exports.generateSalesReport = async (req, res) => {
         }
         const userRole = user.role.role_name;
 
-        if (!filter || !['last_7_days', 'last_30_days'].includes(filter)) {
-            return res.status(400).json({ success: false, message: 'Invalid filter' });
+        // Validate startDate and endDate
+        if (!startDate || !endDate) {
+            return res.status(400).json({ success: false, message: 'startDate and endDate are required' });
         }
 
-        const { startDate, endDate } = getDateRange(filter);
+        const start = moment(startDate, 'YYYY-MM-DD', true);
+        const end = moment(endDate, 'YYYY-MM-DD', true);
+        if (!start.isValid() || !end.isValid() || start.isAfter(end)) {
+            return res.status(400).json({ success: false, message: 'Invalid date range' });
+        }
+        const reportStartDate = start.toDate();
+        const reportEndDate = end.toDate();
 
         let salesData = [];
         let paymentData = [];
@@ -480,16 +487,16 @@ exports.generateSalesReport = async (req, res) => {
                     'SalonId',
                     [db.Sequelize.fn('DATE', db.Sequelize.col('Appointment.createdAt')), 'date'],
                     [db.Sequelize.fn('COUNT', db.Sequelize.col('Appointment.id')), 'appointments'],
-                    'paymentMode', // Added paymentMode
+                    'paymentMode',
                 ],
                 where: {
                     status: 'completed',
-                    createdAt: { [Op.between]: [startDate, endDate] },
+                    createdAt: { [Op.between]: [reportStartDate, reportEndDate] },
                 },
                 group: [
                     'SalonId',
                     db.Sequelize.fn('DATE', db.Sequelize.col('Appointment.createdAt')),
-                    'paymentMode' // Group by paymentMode to get counts per mode
+                    'paymentMode'
                 ],
                 order: [
                     'SalonId',
@@ -506,7 +513,7 @@ exports.generateSalesReport = async (req, res) => {
                 ],
                 where: {
                     paymentStatus: 'Success',
-                    createdAt: { [Op.between]: [startDate, endDate] },
+                    createdAt: { [Op.between]: [reportStartDate, reportEndDate] },
                 },
                 group: [db.Sequelize.fn('DATE', db.Sequelize.col('createdAt'))],
                 order: [[db.Sequelize.fn('DATE', db.Sequelize.col('createdAt')), 'ASC']],
@@ -519,18 +526,18 @@ exports.generateSalesReport = async (req, res) => {
                     [db.Sequelize.fn('DATE', db.Sequelize.col('Appointment.createdAt')), 'date'],
                     [db.Sequelize.fn('COUNT', db.Sequelize.col('Appointment.id')), 'appointments'],
                     [db.Sequelize.fn('SUM', db.Sequelize.col('Services.max_price')), 'revenue'],
-                    'paymentMode', // Added paymentMode
+                    'paymentMode',
                 ],
                 where: {
                     status: 'completed',
-                    createdAt: { [Op.between]: [startDate, endDate] },
+                    createdAt: { [Op.between]: [reportStartDate, reportEndDate] },
                     SalonId: req.user.salonId,
                 },
                 include: [{ model: Service, through: { attributes: [] }, attributes: [] }],
                 group: [
                     'SalonId',
                     db.Sequelize.fn('DATE', db.Sequelize.col('Appointment.createdAt')),
-                    'paymentMode' // Group by paymentMode
+                    'paymentMode'
                 ],
                 order: [
                     'SalonId',
@@ -547,7 +554,7 @@ exports.generateSalesReport = async (req, res) => {
                 ],
                 where: {
                     paymentStatus: 'Success',
-                    createdAt: { [Op.between]: [startDate, endDate] },
+                    createdAt: { [Op.between]: [reportStartDate, reportEndDate] },
                     appointmentId: {
                         [Op.in]: db.Sequelize.literal(`(SELECT id FROM Appointments WHERE SalonId = ${req.user.salonId})`)
                     }
@@ -595,8 +602,8 @@ exports.generateSalesReport = async (req, res) => {
                     date,
                     appointments: groupedSalesData[salonId][date].reduce((sum, e) => sum + e.appointments, 0)
                 })),
-                startDate,
-                endDate
+                reportStartDate,
+                reportEndDate
             );
 
             formattedDataBySalon[salonId] = {
@@ -633,13 +640,13 @@ exports.generateSalesReport = async (req, res) => {
 
         // Generate PDF
         const doc = new PDFDocument();
-        const fileName = `sales_report_${filter}_${Date.now()}.pdf`;
+        const fileName = `sales_report_${moment(reportStartDate).format('YYYYMMDD')}_to_${moment(reportEndDate).format('YYYYMMDD')}_${Date.now()}.pdf`;
         const filePath = path.join(__dirname, fileName);
 
         const stream = fs.createWriteStream(filePath);
         doc.pipe(stream);
 
-        const reportTitle = `Shear Brilliance Sales Report Last ${filter === 'last_30_days' ? '30' : '7'} Days`;
+        const reportTitle = `Shear Brilliance Sales Report ${moment(reportStartDate).format('YYYY-MM-DD')} to ${moment(reportEndDate).format('YYYY-MM-DD')}`;
         doc.fontSize(16).text(reportTitle, { align: 'center' });
         doc.moveDown();
         doc.fontSize(12).text(`Generated on: ${moment().format('MMMM Do YYYY, h:mm:ss a')}`);
@@ -656,17 +663,11 @@ exports.generateSalesReport = async (req, res) => {
                 entry.details.forEach(detail => {
                     const appointmentsStr = String(detail.appointments).padEnd(12);
                     const paymentModeStr = detail.paymentMode === 'Pay_In_Person' ? 'Offline' : detail.paymentMode === 'Pay_Online' ? 'Online' : 'N/A';
-                    
-                    // Show total payment only once per date
                     const paymentStr = isFirstEntryForDate ? `$${entry.totalPayment}` : '';
-                
                     doc.text(`${entry.date} |       ${appointmentsStr} |         ${paymentModeStr} |         ${paymentStr}`);
-                
-                    isFirstEntryForDate = false; // Ensure it prints only for the first row
+                    isFirstEntryForDate = false;
                 });
-                
             });
-            
 
             doc.moveDown();
             doc.fontSize(12).text('Totals', { underline: true });
@@ -702,3 +703,7 @@ exports.generateSalesReport = async (req, res) => {
         res.status(500).json({ success: false, message: 'Server Error' });
     }
 };
+
+
+
+
