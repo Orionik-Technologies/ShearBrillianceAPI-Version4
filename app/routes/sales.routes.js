@@ -385,22 +385,30 @@ module.exports = app => {
 
       app.get(`${apiPrefix}/payment`, [authenticateToken],authenticateJWT, authorizeRoles(roles.ADMIN, roles.SALON_OWNER,roles.BARBER, roles.SALON_MANAGER),salesController.getPaymentData);
 
-
-      /**
+    /**
      * @swagger
      * /api/sales/report:
      *   get:
      *     summary: Generate and download a sales report
-     *     description: Generates a sales report based on the selected filter (last 7 days or last 30 days) and uploads it to DigitalOcean Spaces.
+     *     description: Generates a sales report based on a custom date range specified by startDate and endDate, and uploads it to DigitalOcean Spaces.
      *     tags: [Sales]
      *     parameters:
      *       - in: query
-     *         name: filter
+     *         name: startDate
      *         schema:
      *           type: string
-     *           enum: [last_7_days, last_30_days]
+     *           format: date
+     *           example: "2025-02-01"
      *         required: true
-     *         description: Filter option for the report (last 7 days or last 30 days)
+     *         description: Start date of the report (YYYY-MM-DD).
+     *       - in: query
+     *         name: endDate
+     *         schema:
+     *           type: string
+     *           format: date
+     *           example: "2025-02-28"
+     *         required: true
+     *         description: End date of the report (YYYY-MM-DD).
      *     responses:
      *       200:
      *         description: Sales report generated and uploaded successfully
@@ -422,7 +430,7 @@ module.exports = app => {
      *                       type: string
      *                       example: "https://your-digitalocean-space-url/reports/sales_report.pdf"
      *       400:
-     *         description: Invalid filter or bad request
+     *         description: Missing or invalid startDate/endDate
      *       401:
      *         description: Unauthorized user
      *       403:
@@ -430,7 +438,6 @@ module.exports = app => {
      *       500:
      *         description: Server error
      */
-
       app.get(`${apiPrefix}/report`, [authenticateToken],authenticateJWT, authorizeRoles(roles.ADMIN, roles.SALON_OWNER,roles.BARBER, roles.SALON_MANAGER),salesController.generateSalesReport);
     
 };
