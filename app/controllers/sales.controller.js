@@ -477,21 +477,24 @@ exports.generateSalesReport = async (req, res) => {
         if (userRole === role.ADMIN) {
             salesData = await Appointment.findAll({
                 attributes: [
-                    'SalonId', // Added SalonId to group by salon
+                    'SalonId',
                     [db.Sequelize.fn('DATE', db.Sequelize.col('Appointment.createdAt')), 'date'],
                     [db.Sequelize.fn('COUNT', db.Sequelize.col('Appointment.id')), 'appointments'],
+                    'paymentMode', // Added paymentMode
                 ],
                 where: {
                     status: 'completed',
                     createdAt: { [Op.between]: [startDate, endDate] },
                 },
                 group: [
-                    'SalonId', // Group by SalonId as well
-                    db.Sequelize.fn('DATE', db.Sequelize.col('Appointment.createdAt'))
+                    'SalonId',
+                    db.Sequelize.fn('DATE', db.Sequelize.col('Appointment.createdAt')),
+                    'paymentMode' // Group by paymentMode to get counts per mode
                 ],
                 order: [
-                    'SalonId', // Order by SalonId first
-                    [db.Sequelize.fn('DATE', db.Sequelize.col('Appointment.createdAt')), 'ASC']
+                    'SalonId',
+                    [db.Sequelize.fn('DATE', db.Sequelize.col('Appointment.createdAt')), 'ASC'],
+                    'paymentMode'
                 ],
                 raw: true,
             });
@@ -512,10 +515,11 @@ exports.generateSalesReport = async (req, res) => {
         } else if (userRole === role.SALON_MANAGER) {
             salesData = await Appointment.findAll({
                 attributes: [
-                    'SalonId', // Added for consistency, though filtered by one salon
+                    'SalonId',
                     [db.Sequelize.fn('DATE', db.Sequelize.col('Appointment.createdAt')), 'date'],
                     [db.Sequelize.fn('COUNT', db.Sequelize.col('Appointment.id')), 'appointments'],
                     [db.Sequelize.fn('SUM', db.Sequelize.col('Services.max_price')), 'revenue'],
+                    'paymentMode', // Added paymentMode
                 ],
                 where: {
                     status: 'completed',
@@ -524,12 +528,14 @@ exports.generateSalesReport = async (req, res) => {
                 },
                 include: [{ model: Service, through: { attributes: [] }, attributes: [] }],
                 group: [
-                    'SalonId', // Group by SalonId (though only one will match)
-                    db.Sequelize.fn('DATE', db.Sequelize.col('Appointment.createdAt'))
+                    'SalonId',
+                    db.Sequelize.fn('DATE', db.Sequelize.col('Appointment.createdAt')),
+                    'paymentMode' // Group by paymentMode
                 ],
                 order: [
                     'SalonId',
-                    [db.Sequelize.fn('DATE', db.Sequelize.col('Appointment.createdAt')), 'ASC']
+                    [db.Sequelize.fn('DATE', db.Sequelize.col('Appointment.createdAt')), 'ASC'],
+                    'paymentMode'
                 ],
                 raw: true,
             });
@@ -542,7 +548,7 @@ exports.generateSalesReport = async (req, res) => {
                 where: {
                     paymentStatus: 'Success',
                     createdAt: { [Op.between]: [startDate, endDate] },
-                    appointmentId: { // Use subquery to filter by SalonId
+                    appointmentId: {
                         [Op.in]: db.Sequelize.literal(`(SELECT id FROM Appointments WHERE SalonId = ${req.user.salonId})`)
                     }
                 },
@@ -564,38 +570,65 @@ exports.generateSalesReport = async (req, res) => {
             return acc;
         }, {});
 
-        // Group sales data by salon
+        // Group sales data by salon and date
         const groupedSalesData = {};
         salesData.forEach(entry => {
             if (!groupedSalesData[entry.SalonId]) {
-                groupedSalesData[entry.SalonId] = [];
+                groupedSalesData[entry.SalonId] = {};
             }
-            groupedSalesData[entry.SalonId].push({
-                date: entry.date,
+            if (!groupedSalesData[entry.SalonId][entry.date]) {
+                groupedSalesData[entry.SalonId][entry.date] = [];
+            }
+            groupedSalesData[entry.SalonId][entry.date].push({
                 appointments: entry.appointments,
+                paymentMode: entry.paymentMode,
                 revenue: entry.revenue || 0
             });
         });
 
-        // Format sales data per salon
-        const formattedSalesDataBySalon = {};
+        // Format sales data per salon and calculate totals
+        const formattedDataBySalon = {};
         Object.keys(groupedSalesData).forEach(salonId => {
-            formattedSalesDataBySalon[salonId] = formatSalesData(groupedSalesData[salonId], startDate, endDate);
+            const dates = Object.keys(groupedSalesData[salonId]).sort();
+            const formattedDates = formatSalesData(
+                dates.map(date => ({
+                    date,
+                    appointments: groupedSalesData[salonId][date].reduce((sum, e) => sum + e.appointments, 0)
+                })),
+                startDate,
+                endDate
+            );
+
+            formattedDataBySalon[salonId] = {
+                dailyData: formattedDates.map(dateEntry => ({
+                    ...dateEntry,
+                    details: groupedSalesData[salonId][dateEntry.date] || [],
+                })),
+                totals: {
+                    totalAppointments: 0,
+                    totalPayment: 0
+                }
+            };
         });
 
-        // Process payment data (not grouped by salon yet)
+        // Process payment data
         const paymentMap = {};
         paymentData.forEach(payment => {
             paymentMap[payment.date] = parseFloat(payment.totalPayment || 0).toFixed(2);
         });
 
-        // Combine sales and payment data per salon
-        const formattedDataBySalon = {};
-        Object.keys(formattedSalesDataBySalon).forEach(salonId => {
-            formattedDataBySalon[salonId] = formattedSalesDataBySalon[salonId].map(entry => ({
-                ...entry,
-                totalPayment: paymentMap[entry.date] || '0.00'
-            }));
+        // Combine with payment data and calculate totals
+        Object.keys(formattedDataBySalon).forEach(salonId => {
+            formattedDataBySalon[salonId].dailyData = formattedDataBySalon[salonId].dailyData.map(entry => {
+                const totalPayment = paymentMap[entry.date] || '0.00';
+                formattedDataBySalon[salonId].totals.totalAppointments += entry.appointments;
+                formattedDataBySalon[salonId].totals.totalPayment += parseFloat(totalPayment);
+                return {
+                    ...entry,
+                    totalPayment
+                };
+            });
+            formattedDataBySalon[salonId].totals.totalPayment = formattedDataBySalon[salonId].totals.totalPayment.toFixed(2);
         });
 
         // Generate PDF
@@ -613,15 +646,24 @@ exports.generateSalesReport = async (req, res) => {
         doc.moveDown();
 
         // Print data for each salon
-        for (const [salonId, data] of Object.entries(formattedDataBySalon)) {
+        for (const [salonId, salonData] of Object.entries(formattedDataBySalon)) {
             doc.fontSize(14).text(`Salon: ${salonMap[salonId] || `ID ${salonId}`}`, { underline: true });
             doc.moveDown();
-            doc.fontSize(12).text('Date       | Appointments |     Total Payment', { underline: true });
-            data.forEach(entry => {
-                const appointmentsStr = String(entry.appointments).padEnd(12);
-                const paymentStr = `$${String(entry.totalPayment)}`;
-                doc.text(`${entry.date} |       ${appointmentsStr} |       ${paymentStr}`);
+            doc.fontSize(12).text('Date       | Appointments | Payment Mode       | Total Payment', { underline: true });
+
+            salonData.dailyData.forEach(entry => {
+                entry.details.forEach(detail => {
+                    const appointmentsStr = String(detail.appointments).padEnd(12);
+                    const paymentModeStr = detail.paymentMode === 'Pay_In_Person' ? 'Offline' : detail.paymentMode === 'Pay_Online' ? 'Online' : 'N/A';
+                    const paymentStr = entry.details.length === 1 ? `$${entry.totalPayment}` : '';
+                    doc.text(`${entry.date} |       ${appointmentsStr} | ${paymentModeStr} | ${paymentStr} | ${entry.totalPayment}`);
+                });
             });
+            
+
+            doc.moveDown();
+            doc.fontSize(12).text('Totals', { underline: true });
+            doc.text(`Total Payment: $${salonData.totals.totalPayment}`);
             doc.moveDown();
         }
 
@@ -653,4 +695,3 @@ exports.generateSalesReport = async (req, res) => {
         res.status(500).json({ success: false, message: 'Server Error' });
     }
 };
-
