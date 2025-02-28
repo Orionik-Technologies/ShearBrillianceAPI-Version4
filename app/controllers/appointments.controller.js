@@ -886,6 +886,23 @@ exports.updateStatus = async (req, res) => {
             // or implement a new status for completed appointments' slots
         }
 
+        // Fetch the payment record for the appointment
+        const payment = await db.Payment.findOne({ where: { appointmentId: appointment.id } });
+
+        // If payment exists and is Pay_In_Person, update status to Success
+        if (payment && appointment.paymentMode === PaymentMethodENUM.Pay_In_Person) {
+            if (payment.paymentStatus !== 'Success') { // Avoid redundant updates
+            await payment.update({
+                paymentStatus: 'Success',
+                paymentDate: new Date(), // Optional: Record the date of payment
+            });
+            await appointment.update({
+                paymentStatus: 'Success', // Sync appointment's paymentStatus with Payment model
+            });
+            }
+        }
+        
+
         const fcmTokens = await FcmToken.findAll({ where: { UserId: appointment.UserId } });
         if (fcmTokens.length > 0) {
           const notificationTitle = "Appointment completed";
@@ -2693,6 +2710,7 @@ exports.getLastHaircutDetails = async (req, res) => {
         });
     }
 };
+
 
 exports.getAppointments = async (req, res) => {
     const { page = 1, limit = 10, startDate, endDate, status, search } = req.query;
