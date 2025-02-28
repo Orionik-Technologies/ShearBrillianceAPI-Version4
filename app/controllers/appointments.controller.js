@@ -2185,7 +2185,7 @@ const getAppointmentsByRoleForAdmin = async (ischeckRole,user) => {
      // Fetch appointments
     const appointments = await Appointment.findAll({
         where: whereCondition,
-        attributes: ['id', 'number_of_people', 'status', 'estimated_wait_time', 'queue_position', 'mobile_number', 'name', 'check_in_time', 'in_salon_time', 'complete_time', 'cancel_time', 'BarberId','SalonId'],
+        attributes: ['id', 'number_of_people', 'status', 'estimated_wait_time', 'queue_position', 'mobile_number', 'name', 'check_in_time', 'in_salon_time', 'complete_time', 'cancel_time', 'BarberId','SalonId','paymentMode', 'paymentStatus'],
         include: [
             { model: User, as: 'User', attributes: ['id','firstname','lastname', 'profile_photo'] },
             { model: Barber, as: 'Barber', attributes: ['name','background_color'] },
