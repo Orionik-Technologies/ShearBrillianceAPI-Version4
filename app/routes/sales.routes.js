@@ -314,5 +314,75 @@ module.exports = app => {
  *                   example: "Server Error"
  */
       app.get(`${apiPrefix}/gettopService`, [authenticateToken],authenticateJWT, authorizeRoles(roles.ADMIN, roles.SALON_OWNER,roles.BARBER, roles.SALON_MANAGER), salesController.gettopService);
+
+
+    /**
+     * @swagger
+     * /api/sales/payment:
+     *   get:
+     *     summary: Retrieve total sales filtered by date range
+     *     description: Fetch total successful payments and categorize them by online and offline payments. Supports filtering by today, last 7 days, and last 30 days.
+     *     tags:
+     *       - Sales
+     *     parameters:
+     *       - in: query
+     *         name: filter
+     *         schema:
+     *           type: string
+     *           enum: [today, 7days, 30days]
+     *         description: Filter by date range (today, last 7 days, or last 30 days)
+     *     responses:
+     *       200:
+     *         description: Sales data retrieved successfully
+     *         content:
+     *           application/json:
+     *             schema:
+     *               type: object
+     *               properties:
+     *                 success:
+     *                   type: boolean
+     *                   example: true
+     *                 message:
+     *                   type: string
+     *                   example: "Sales data retrieved successfully"
+     *                 data:
+     *                   type: object
+     *                   properties:
+     *                     online:
+     *                       type: number
+     *                       example: 3000.00
+     *                     offline:
+     *                       type: number
+     *                       example: 2000.00
+     *                     total:
+     *                       type: number
+     *                       example: 5000.00
+     *                 code:
+     *                   type: integer
+     *                   example: 200
+     *       400:
+     *         description: Invalid filter parameter
+     *       500:
+     *         description: Error fetching sales data
+     *         content:
+     *           application/json:
+     *             schema:
+     *               type: object
+     *               properties:
+     *                 success:
+     *                   type: boolean
+     *                   example: false
+     *                 message:
+     *                   type: string
+     *                   example: "Error fetching sales data"
+     *                 error:
+     *                   type: string
+     *                   example: "Database connection error"
+     *                 code:
+     *                   type: integer
+     *                   example: 500
+     */
+
+      app.get(`${apiPrefix}/payment`, salesController.getPaymentData);
     
 };
