@@ -5,6 +5,7 @@ const Appointment = db.Appointment;
 const AppointmentService = db.AppointmentService;
 const Service =db.Service;
 const User = db.USER;
+const Payment = db.Payment;
 const { role } = require('../config/roles.config');
 const jwt = require('jsonwebtoken');
 const roles = db.roles;
@@ -382,5 +383,67 @@ exports.gettopService = async (req, res) => {
     } catch (error) {
         console.error('Error fetching sales data:', error);
         res.status(500).json({ success: false, message: 'Server Error' });
+    }
+};
+
+
+exports.getPaymentData = async (req, res) => {
+    try {
+        const { filter } = req.query; // Accepts filter as query param: 'today', '7days', '30days'
+
+        let startDate;
+        const endDate = new Date(); // Current date
+        if (filter === 'today') {
+            startDate = new Date();
+            startDate.setHours(0, 0, 0, 0); // Start of the day
+        } else if (filter === '7days') {
+            startDate = new Date();
+            startDate.setDate(startDate.getDate() - 7);
+        } else if (filter === '30days') {
+            startDate = new Date();
+            startDate.setDate(startDate.getDate() - 30);
+        }
+
+        const whereClause = startDate ? { createdAt: { [Op.between]: [startDate, endDate] } } : {};
+
+        // Fetch appointments within the given timeframe
+        const appointments = await Appointment.findAll({
+            where: whereClause,
+            attributes: ['id', 'paymentMode']
+        });
+
+        const appointmentIds = appointments.map(app => app.id);
+
+        // Fetch payments with successful status linked to the filtered appointments
+        const payments = await Payment.findAll({
+            where: {
+                appointmentId: { [Op.in]: appointmentIds },
+                paymentStatus: 'Success'
+            },
+            attributes: ['appointmentId', 'totalAmount']
+        });
+
+        const paymentMap = payments.reduce((map, payment) => {
+            map[payment.appointmentId] = payment.totalAmount;
+            return map;
+        }, {});
+
+        // Calculate totals
+        const totals = appointments.reduce((acc, appointment) => {
+            const totalAmount = paymentMap[appointment.id];
+            if (totalAmount) {
+                if (appointment.paymentMode === 'Pay_Online') {
+                    acc.online += parseFloat(totalAmount) || 0;
+                } else if (appointment.paymentMode === 'Pay_In_Person') {
+                    acc.offline += parseFloat(totalAmount) || 0;
+                }
+                acc.total += parseFloat(totalAmount) || 0;
+            }
+            return acc;
+        }, { online: 0, offline: 0, total: 0 });
+
+        return res.json({ success: true, data: totals });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: 'Error fetching revenue data', error: error.message });
     }
 };
