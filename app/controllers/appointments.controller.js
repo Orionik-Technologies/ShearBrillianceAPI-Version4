@@ -1591,6 +1591,8 @@ exports.findAllAppointments = async (req, res) => {
                     status: apt.status,
                     Services: apt.Services,
                     User: apt.User,
+                    paymentMode: apt.paymentMode,
+                    paymentStatus: apt.paymentStatus,
                     Barber: {
                         name: apt.Barber?.name,
                         photo: apt.Barber?.photo,
