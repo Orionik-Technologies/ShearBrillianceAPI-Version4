@@ -477,6 +477,7 @@ exports.generateSalesReport = async (req, res) => {
         if (userRole === role.ADMIN) {
             salesData = await Appointment.findAll({
                 attributes: [
+                    'SalonId', // Added SalonId to group by salon
                     [db.Sequelize.fn('DATE', db.Sequelize.col('Appointment.createdAt')), 'date'],
                     [db.Sequelize.fn('COUNT', db.Sequelize.col('Appointment.id')), 'appointments'],
                 ],
@@ -484,8 +485,14 @@ exports.generateSalesReport = async (req, res) => {
                     status: 'completed',
                     createdAt: { [Op.between]: [startDate, endDate] },
                 },
-                group: [db.Sequelize.fn('DATE', db.Sequelize.col('Appointment.createdAt'))],
-                order: [[db.Sequelize.fn('DATE', db.Sequelize.col('Appointment.createdAt')), 'ASC']],
+                group: [
+                    'SalonId', // Group by SalonId as well
+                    db.Sequelize.fn('DATE', db.Sequelize.col('Appointment.createdAt'))
+                ],
+                order: [
+                    'SalonId', // Order by SalonId first
+                    [db.Sequelize.fn('DATE', db.Sequelize.col('Appointment.createdAt')), 'ASC']
+                ],
                 raw: true,
             });
 
@@ -502,56 +509,96 @@ exports.generateSalesReport = async (req, res) => {
                 order: [[db.Sequelize.fn('DATE', db.Sequelize.col('createdAt')), 'ASC']],
                 raw: true,
             });
+        } else if (userRole === role.SALON_MANAGER) {
+            salesData = await Appointment.findAll({
+                attributes: [
+                    'SalonId', // Added for consistency, though filtered by one salon
+                    [db.Sequelize.fn('DATE', db.Sequelize.col('Appointment.createdAt')), 'date'],
+                    [db.Sequelize.fn('COUNT', db.Sequelize.col('Appointment.id')), 'appointments'],
+                    [db.Sequelize.fn('SUM', db.Sequelize.col('Services.max_price')), 'revenue'],
+                ],
+                where: {
+                    status: 'completed',
+                    createdAt: { [Op.between]: [startDate, endDate] },
+                    SalonId: req.user.salonId,
+                },
+                include: [{ model: Service, through: { attributes: [] }, attributes: [] }],
+                group: [
+                    'SalonId', // Group by SalonId (though only one will match)
+                    db.Sequelize.fn('DATE', db.Sequelize.col('Appointment.createdAt'))
+                ],
+                order: [
+                    'SalonId',
+                    [db.Sequelize.fn('DATE', db.Sequelize.col('Appointment.createdAt')), 'ASC']
+                ],
+                raw: true,
+            });
+
+            paymentData = await Payment.findAll({
+                attributes: [
+                    [db.Sequelize.fn('DATE', db.Sequelize.col('Payment.createdAt')), 'date'],
+                    [db.Sequelize.fn('SUM', db.Sequelize.col('totalAmount')), 'totalPayment'],
+                ],
+                where: {
+                    paymentStatus: 'Success',
+                    createdAt: { [Op.between]: [startDate, endDate] },
+                    appointmentId: { // Use subquery to filter by SalonId
+                        [Op.in]: db.Sequelize.literal(`(SELECT id FROM Appointments WHERE SalonId = ${req.user.salonId})`)
+                    }
+                },
+                group: [db.Sequelize.fn('DATE', db.Sequelize.col('Payment.createdAt'))],
+                order: [[db.Sequelize.fn('DATE', db.Sequelize.col('Payment.createdAt')), 'ASC']],
+                raw: true,
+            });
         }
-    else if (userRole === role.SALON_MANAGER) {
-        salesData = await Appointment.findAll({
-            attributes: [
-                [db.Sequelize.fn('DATE', db.Sequelize.col('Appointment.createdAt')), 'date'],
-                [db.Sequelize.fn('COUNT', db.Sequelize.col('Appointment.id')), 'appointments'],
-                [db.Sequelize.fn('SUM', db.Sequelize.col('Services.max_price')), 'revenue'],
-            ],
-            where: {
-                status: 'completed',
-                createdAt: { [Op.between]: [startDate, endDate] },
-                SalonId: req.user.salonId,
-            },
-            include: [{ model: Service, through: { attributes: [] }, attributes: [] }],
-            group: [db.Sequelize.fn('DATE', db.Sequelize.col('Appointment.createdAt'))],
-            order: [[db.Sequelize.fn('DATE', db.Sequelize.col('Appointment.createdAt')), 'ASC']],
-            raw: true,
+
+        // Fetch salon names
+        const salonIds = [...new Set(salesData.map(item => item.SalonId))];
+        const salons = await Salon.findAll({
+            where: { id: salonIds },
+            attributes: ['id', 'name'],
+            raw: true
+        });
+        const salonMap = salons.reduce((acc, salon) => {
+            acc[salon.id] = salon.name;
+            return acc;
+        }, {});
+
+        // Group sales data by salon
+        const groupedSalesData = {};
+        salesData.forEach(entry => {
+            if (!groupedSalesData[entry.SalonId]) {
+                groupedSalesData[entry.SalonId] = [];
+            }
+            groupedSalesData[entry.SalonId].push({
+                date: entry.date,
+                appointments: entry.appointments,
+                revenue: entry.revenue || 0
+            });
         });
 
-        paymentData = await Payment.findAll({
-            attributes: [
-                [db.Sequelize.fn('DATE', db.Sequelize.col('Payment.createdAt')), 'date'],
-                [db.Sequelize.fn('SUM', db.Sequelize.col('totalAmount')), 'totalPayment'],
-            ],
-            where: {
-                paymentStatus: 'Success',
-                createdAt: { [Op.between]: [startDate, endDate] },
-            },
-            include: [{
-                model: Appointment,
-                where: { SalonId: req.user.salonId },
-                attributes: [],
-            }],
-            group: [db.Sequelize.fn('DATE', db.Sequelize.col('Payment.createdAt'))],
-            order: [[db.Sequelize.fn('DATE', db.Sequelize.col('Payment.createdAt')), 'ASC']],
-            raw: true,
+        // Format sales data per salon
+        const formattedSalesDataBySalon = {};
+        Object.keys(groupedSalesData).forEach(salonId => {
+            formattedSalesDataBySalon[salonId] = formatSalesData(groupedSalesData[salonId], startDate, endDate);
         });
-    }
 
-        const formattedSalesData = formatSalesData(salesData, startDate, endDate);
+        // Process payment data (not grouped by salon yet)
         const paymentMap = {};
-        paymentData.forEach((payment) => {
+        paymentData.forEach(payment => {
             paymentMap[payment.date] = parseFloat(payment.totalPayment || 0).toFixed(2);
         });
 
-        const formattedData = formattedSalesData.map((entry) => ({
-            ...entry,
-            totalPayment: paymentMap[entry.date] || '0.00',
-        }));
+        // Combine sales and payment data per salon
+        const formattedDataBySalon = {};
+        Object.keys(formattedSalesDataBySalon).forEach(salonId => {
+            formattedDataBySalon[salonId] = formattedSalesDataBySalon[salonId].map(entry => ({
+                ...entry,
+                totalPayment: paymentMap[entry.date] || '0.00'
+            }));
+        });
 
+        // Generate PDF
         const doc = new PDFDocument();
         const fileName = `sales_report_${filter}_${Date.now()}.pdf`;
         const filePath = path.join(__dirname, fileName);
@@ -559,19 +606,24 @@ exports.generateSalesReport = async (req, res) => {
         const stream = fs.createWriteStream(filePath);
         doc.pipe(stream);
 
-        const reportTitle = `Shear Brilliance Sales Report Last ${filter === 'last_30_days' ? '30' : '7'} Days`;;
-
+        const reportTitle = `Shear Brilliance Sales Report Last ${filter === 'last_30_days' ? '30' : '7'} Days`;
         doc.fontSize(16).text(reportTitle, { align: 'center' });
         doc.moveDown();
         doc.fontSize(12).text(`Generated on: ${moment().format('MMMM Do YYYY, h:mm:ss a')}`);
         doc.moveDown();
 
-        doc.text('Date       | Appointments |     Total Payment', { underline: true });
-        formattedData.forEach((entry) => {
-            const appointmentsStr = String(entry.appointments).padEnd(12);
-            const paymentStr = `$${String(entry.totalPayment)}`;
-            doc.text(`${entry.date} |       ${appointmentsStr} |       ${paymentStr}`);
-        });
+        // Print data for each salon
+        for (const [salonId, data] of Object.entries(formattedDataBySalon)) {
+            doc.fontSize(14).text(`Salon: ${salonMap[salonId] || `ID ${salonId}`}`, { underline: true });
+            doc.moveDown();
+            doc.fontSize(12).text('Date       | Appointments |     Total Payment', { underline: true });
+            data.forEach(entry => {
+                const appointmentsStr = String(entry.appointments).padEnd(12);
+                const paymentStr = `$${String(entry.totalPayment)}`;
+                doc.text(`${entry.date} |       ${appointmentsStr} |       ${paymentStr}`);
+            });
+            doc.moveDown();
+        }
 
         doc.end();
 
