@@ -447,3 +447,170 @@ exports.getPaymentData = async (req, res) => {
         return res.status(500).json({ success: false, message: 'Error fetching revenue data', error: error.message });
     }
 };
+
+exports.generateSalesReport = async (req, res) => {
+    const { filter } = req.query;
+
+    try {
+        // Step 1: Authentication and Role Check
+        const userId = req.user ? req.user.id : null;
+        if (!userId) {
+            return res.status(401).json({ success: false, message: 'Unauthorized: No user ID found', code: 401 });
+        }
+
+        const user = await User.findByPk(userId, {
+            include: { model: roles, as: 'role' }
+        });
+        if (!user || !user.role) {
+            return res.status(403).json({ success: false, message: 'Unauthorized User' });
+        }
+        const userRole = user.role.role_name;
+
+        // Step 2: Validate filter
+        if (!filter || !['last_7_days', 'last_30_days'].includes(filter)) {
+            return res.status(400).json({ success: false, message: 'Invalid filter' });
+        }
+
+        // Step 3: Get date range
+        const { startDate, endDate } = getDateRange(filter);
+
+        // Step 4: Fetch sales data (appointments and revenue)
+        let salesData = [];
+        let paymentData = [];
+
+        if (userRole === role.ADMIN) {
+            salesData = await Appointment.findAll({
+                attributes: [
+                    [db.Sequelize.fn('DATE', db.Sequelize.col('Appointment.createdAt')), 'date'],
+                    [db.Sequelize.fn('COUNT', db.Sequelize.col('Appointment.id')), 'appointments'],
+                    [db.Sequelize.fn('SUM', db.Sequelize.col('Services.max_price')), 'revenue'],
+                ],
+                where: {
+                    status: 'completed',
+                    createdAt: { [Op.between]: [startDate, endDate] },
+                },
+                include: [{ model: Service, through: { attributes: [] }, attributes: [] }],
+                group: [db.Sequelize.fn('DATE', db.Sequelize.col('Appointment.createdAt'))],
+                order: [[db.Sequelize.fn('DATE', db.Sequelize.col('Appointment.createdAt')), 'ASC']],
+                raw: true,
+            });
+
+            paymentData = await Payment.findAll({
+                attributes: [
+                    [db.Sequelize.fn('DATE', db.Sequelize.col('createdAt')), 'date'],
+                    [db.Sequelize.fn('SUM', db.Sequelize.col('totalAmount')), 'totalPayment'],
+                ],
+                where: {
+                    paymentStatus: 'Success',
+                    createdAt: { [Op.between]: [startDate, endDate] },
+                },
+                group: [db.Sequelize.fn('DATE', db.Sequelize.col('createdAt'))],
+                order: [[db.Sequelize.fn('DATE', db.Sequelize.col('createdAt')), 'ASC']],
+                raw: true,
+            });
+        } else if (userRole === role.SALON_MANAGER) {
+            salesData = await Appointment.findAll({
+                attributes: [
+                    [db.Sequelize.fn('DATE', db.Sequelize.col('Appointment.createdAt')), 'date'],
+                    [db.Sequelize.fn('COUNT', db.Sequelize.col('Appointment.id')), 'appointments'],
+                    [db.Sequelize.fn('SUM', db.Sequelize.col('Services.max_price')), 'revenue'],
+                ],
+                where: {
+                    status: 'completed',
+                    createdAt: { [Op.between]: [startDate, endDate] },
+                    SalonId: req.user.salonId,
+                },
+                include: [{ model: Service, through: { attributes: [] }, attributes: [] }],
+                group: [db.Sequelize.fn('DATE', db.Sequelize.col('Appointment.createdAt'))],
+                order: [[db.Sequelize.fn('DATE', db.Sequelize.col('Appointment.createdAt')), 'ASC']],
+                raw: true,
+            });
+
+            paymentData = await Payment.findAll({
+                attributes: [
+                    [db.Sequelize.fn('DATE', db.Sequelize.col('Payment.createdAt')), 'date'],
+                    [db.Sequelize.fn('SUM', db.Sequelize.col('totalAmount')), 'totalPayment'],
+                ],
+                where: {
+                    paymentStatus: 'Success',
+                    createdAt: { [Op.between]: [startDate, endDate] },
+                },
+                include: [{
+                    model: Appointment,
+                    where: { SalonId: req.user.salonId },
+                    attributes: [],
+                }],
+                group: [db.Sequelize.fn('DATE', db.Sequelize.col('Payment.createdAt'))],
+                order: [[db.Sequelize.fn('DATE', db.Sequelize.col('Payment.createdAt')), 'ASC']],
+                raw: true,
+            });
+        }
+
+        // Step 5: Format sales and payment data
+        const formattedSalesData = formatSalesData(salesData, startDate, endDate);
+
+        const paymentMap = {};
+        paymentData.forEach((payment) => {
+            paymentMap[payment.date] = parseFloat(payment.totalPayment || 0).toFixed(2);
+        });
+
+        const formattedData = formattedSalesData.map((entry) => ({
+            ...entry,
+            totalPayment: paymentMap[entry.date] || '0.00',
+        }));
+
+        // Step 6: Generate PDF
+        const doc = new PDFDocument();
+        const fileName = `sales_report_${filter}_${Date.now()}.pdf`;
+        const filePath = path.join(__dirname, fileName);
+
+        const stream = fs.createWriteStream(filePath);
+        doc.pipe(stream);
+
+        doc.fontSize(16).text(`Sales Report (${filter.replace('_', ' ')})`, { align: 'center' });
+        doc.moveDown();
+        doc.fontSize(12).text(`Generated on: ${moment().format('MMMM Do YYYY, h:mm:ss a')}`);
+        doc.moveDown();
+
+        // Table header
+        doc.text('Date       | Appointments | Revenue    | Total Payment', { underline: true });
+        formattedData.forEach((entry) => {
+            // Convert numbers to strings before using padEnd
+            const appointmentsStr = String(entry.appointments).padEnd(12);
+            const revenueStr = `$${String(entry.revenue).padEnd(10)}`;
+            const paymentStr = `$${String(entry.totalPayment)}`;
+            doc.text(`${entry.date} | ${appointmentsStr} | ${revenueStr} | ${paymentStr}`);
+        });
+
+        doc.end();
+
+        // Wait for the stream to finish writing
+        await new Promise((resolve) => stream.on('finish', resolve));
+
+        // Step 7: Upload to DigitalOcean Spaces
+        const fileBuffer = fs.readFileSync(filePath);
+        const uploadParams = {
+            Bucket: process.env.DO_SPACES_BUCKET,
+            Key: `reports/${fileName}`,
+            Body: fileBuffer,
+            ACL: 'public-read',
+            ContentType: 'application/pdf',
+        };
+
+        const uploadResult = await s3.upload(uploadParams).promise();
+        const downloadUrl = uploadResult.Location;
+
+        // Step 8: Clean up local file
+        fs.unlinkSync(filePath);
+
+        // Step 9: Send response with download URL
+        res.json({
+            success: true,
+            message: 'Sales report with payment data generated and uploaded successfully',
+            data: { downloadUrl },
+        });
+    } catch (error) {
+        console.error('Error generating sales report:', error);
+        res.status(500).json({ success: false, message: 'Server Error' });
+    }
+};
