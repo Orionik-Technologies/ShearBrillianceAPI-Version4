@@ -447,3 +447,258 @@ exports.getPaymentData = async (req, res) => {
         return res.status(500).json({ success: false, message: 'Error fetching revenue data', error: error.message });
     }
 };
+
+exports.generateSalesReport = async (req, res) => {
+    const { filter } = req.query;
+
+    try {
+        const userId = req.user ? req.user.id : null;
+        if (!userId) {
+            return res.status(401).json({ success: false, message: 'Unauthorized: No user ID found', code: 401 });
+        }
+
+        const user = await User.findByPk(userId, {
+            include: { model: roles, as: 'role' }
+        });
+        if (!user || !user.role) {
+            return res.status(403).json({ success: false, message: 'Unauthorized User' });
+        }
+        const userRole = user.role.role_name;
+
+        if (!filter || !['last_7_days', 'last_30_days'].includes(filter)) {
+            return res.status(400).json({ success: false, message: 'Invalid filter' });
+        }
+
+        const { startDate, endDate } = getDateRange(filter);
+
+        let salesData = [];
+        let paymentData = [];
+
+        if (userRole === role.ADMIN) {
+            salesData = await Appointment.findAll({
+                attributes: [
+                    'SalonId',
+                    [db.Sequelize.fn('DATE', db.Sequelize.col('Appointment.createdAt')), 'date'],
+                    [db.Sequelize.fn('COUNT', db.Sequelize.col('Appointment.id')), 'appointments'],
+                    'paymentMode', // Added paymentMode
+                ],
+                where: {
+                    status: 'completed',
+                    createdAt: { [Op.between]: [startDate, endDate] },
+                },
+                group: [
+                    'SalonId',
+                    db.Sequelize.fn('DATE', db.Sequelize.col('Appointment.createdAt')),
+                    'paymentMode' // Group by paymentMode to get counts per mode
+                ],
+                order: [
+                    'SalonId',
+                    [db.Sequelize.fn('DATE', db.Sequelize.col('Appointment.createdAt')), 'ASC'],
+                    'paymentMode'
+                ],
+                raw: true,
+            });
+
+            paymentData = await Payment.findAll({
+                attributes: [
+                    [db.Sequelize.fn('DATE', db.Sequelize.col('createdAt')), 'date'],
+                    [db.Sequelize.fn('SUM', db.Sequelize.col('totalAmount')), 'totalPayment'],
+                ],
+                where: {
+                    paymentStatus: 'Success',
+                    createdAt: { [Op.between]: [startDate, endDate] },
+                },
+                group: [db.Sequelize.fn('DATE', db.Sequelize.col('createdAt'))],
+                order: [[db.Sequelize.fn('DATE', db.Sequelize.col('createdAt')), 'ASC']],
+                raw: true,
+            });
+        } else if (userRole === role.SALON_MANAGER) {
+            salesData = await Appointment.findAll({
+                attributes: [
+                    'SalonId',
+                    [db.Sequelize.fn('DATE', db.Sequelize.col('Appointment.createdAt')), 'date'],
+                    [db.Sequelize.fn('COUNT', db.Sequelize.col('Appointment.id')), 'appointments'],
+                    [db.Sequelize.fn('SUM', db.Sequelize.col('Services.max_price')), 'revenue'],
+                    'paymentMode', // Added paymentMode
+                ],
+                where: {
+                    status: 'completed',
+                    createdAt: { [Op.between]: [startDate, endDate] },
+                    SalonId: req.user.salonId,
+                },
+                include: [{ model: Service, through: { attributes: [] }, attributes: [] }],
+                group: [
+                    'SalonId',
+                    db.Sequelize.fn('DATE', db.Sequelize.col('Appointment.createdAt')),
+                    'paymentMode' // Group by paymentMode
+                ],
+                order: [
+                    'SalonId',
+                    [db.Sequelize.fn('DATE', db.Sequelize.col('Appointment.createdAt')), 'ASC'],
+                    'paymentMode'
+                ],
+                raw: true,
+            });
+
+            paymentData = await Payment.findAll({
+                attributes: [
+                    [db.Sequelize.fn('DATE', db.Sequelize.col('Payment.createdAt')), 'date'],
+                    [db.Sequelize.fn('SUM', db.Sequelize.col('totalAmount')), 'totalPayment'],
+                ],
+                where: {
+                    paymentStatus: 'Success',
+                    createdAt: { [Op.between]: [startDate, endDate] },
+                    appointmentId: {
+                        [Op.in]: db.Sequelize.literal(`(SELECT id FROM Appointments WHERE SalonId = ${req.user.salonId})`)
+                    }
+                },
+                group: [db.Sequelize.fn('DATE', db.Sequelize.col('Payment.createdAt'))],
+                order: [[db.Sequelize.fn('DATE', db.Sequelize.col('Payment.createdAt')), 'ASC']],
+                raw: true,
+            });
+        }
+
+        // Fetch salon names
+        const salonIds = [...new Set(salesData.map(item => item.SalonId))];
+        const salons = await Salon.findAll({
+            where: { id: salonIds },
+            attributes: ['id', 'name'],
+            raw: true
+        });
+        const salonMap = salons.reduce((acc, salon) => {
+            acc[salon.id] = salon.name;
+            return acc;
+        }, {});
+
+        // Group sales data by salon and date
+        const groupedSalesData = {};
+        salesData.forEach(entry => {
+            if (!groupedSalesData[entry.SalonId]) {
+                groupedSalesData[entry.SalonId] = {};
+            }
+            if (!groupedSalesData[entry.SalonId][entry.date]) {
+                groupedSalesData[entry.SalonId][entry.date] = [];
+            }
+            groupedSalesData[entry.SalonId][entry.date].push({
+                appointments: entry.appointments,
+                paymentMode: entry.paymentMode,
+                revenue: entry.revenue || 0
+            });
+        });
+
+        // Format sales data per salon and calculate totals
+        const formattedDataBySalon = {};
+        Object.keys(groupedSalesData).forEach(salonId => {
+            const dates = Object.keys(groupedSalesData[salonId]).sort();
+            const formattedDates = formatSalesData(
+                dates.map(date => ({
+                    date,
+                    appointments: groupedSalesData[salonId][date].reduce((sum, e) => sum + e.appointments, 0)
+                })),
+                startDate,
+                endDate
+            );
+
+            formattedDataBySalon[salonId] = {
+                dailyData: formattedDates.map(dateEntry => ({
+                    ...dateEntry,
+                    details: groupedSalesData[salonId][dateEntry.date] || [],
+                })),
+                totals: {
+                    totalAppointments: 0,
+                    totalPayment: 0
+                }
+            };
+        });
+
+        // Process payment data
+        const paymentMap = {};
+        paymentData.forEach(payment => {
+            paymentMap[payment.date] = parseFloat(payment.totalPayment || 0).toFixed(2);
+        });
+
+        // Combine with payment data and calculate totals
+        Object.keys(formattedDataBySalon).forEach(salonId => {
+            formattedDataBySalon[salonId].dailyData = formattedDataBySalon[salonId].dailyData.map(entry => {
+                const totalPayment = paymentMap[entry.date] || '0.00';
+                formattedDataBySalon[salonId].totals.totalAppointments += entry.appointments;
+                formattedDataBySalon[salonId].totals.totalPayment += parseFloat(totalPayment);
+                return {
+                    ...entry,
+                    totalPayment
+                };
+            });
+            formattedDataBySalon[salonId].totals.totalPayment = formattedDataBySalon[salonId].totals.totalPayment.toFixed(2);
+        });
+
+        // Generate PDF
+        const doc = new PDFDocument();
+        const fileName = `sales_report_${filter}_${Date.now()}.pdf`;
+        const filePath = path.join(__dirname, fileName);
+
+        const stream = fs.createWriteStream(filePath);
+        doc.pipe(stream);
+
+        const reportTitle = `Shear Brilliance Sales Report Last ${filter === 'last_30_days' ? '30' : '7'} Days`;
+        doc.fontSize(16).text(reportTitle, { align: 'center' });
+        doc.moveDown();
+        doc.fontSize(12).text(`Generated on: ${moment().format('MMMM Do YYYY, h:mm:ss a')}`);
+        doc.moveDown();
+
+        // Print data for each salon
+        for (const [salonId, salonData] of Object.entries(formattedDataBySalon)) {
+            doc.fontSize(14).text(`Salon: ${salonMap[salonId] || `ID ${salonId}`}`, { underline: true });
+            doc.moveDown();
+            doc.fontSize(12).text('Date       | Appointments | Payment Mode       | Total Payment', { underline: true });
+
+            salonData.dailyData.forEach(entry => {
+                let isFirstEntryForDate = true;
+                entry.details.forEach(detail => {
+                    const appointmentsStr = String(detail.appointments).padEnd(12);
+                    const paymentModeStr = detail.paymentMode === 'Pay_In_Person' ? 'Offline' : detail.paymentMode === 'Pay_Online' ? 'Online' : 'N/A';
+                    
+                    // Show total payment only once per date
+                    const paymentStr = isFirstEntryForDate ? `$${entry.totalPayment}` : '';
+                
+                    doc.text(`${entry.date} |       ${appointmentsStr} |         ${paymentModeStr} |         ${paymentStr}`);
+                
+                    isFirstEntryForDate = false; // Ensure it prints only for the first row
+                });
+                
+            });
+            
+
+            doc.moveDown();
+            doc.fontSize(12).text('Totals', { underline: true });
+            doc.text(`Total Payment: $${salonData.totals.totalPayment}`);
+            doc.moveDown();
+        }
+
+        doc.end();
+
+        await new Promise((resolve) => stream.on('finish', resolve));
+
+        const fileBuffer = fs.readFileSync(filePath);
+        const uploadParams = {
+            Bucket: process.env.DO_SPACES_BUCKET,
+            Key: `reports/${fileName}`,
+            Body: fileBuffer,
+            ACL: 'public-read',
+            ContentType: 'application/pdf',
+        };
+
+        const uploadResult = await s3.upload(uploadParams).promise();
+        const downloadUrl = uploadResult.Location;
+
+        fs.unlinkSync(filePath);
+
+        res.json({
+            success: true,
+            message: 'Sales report with payment data generated and uploaded successfully',
+            data: { downloadUrl },
+        });
+    } catch (error) {
+        console.error('Error generating sales report:', error);
+        res.status(500).json({ success: false, message: 'Server Error' });
+    }
+};

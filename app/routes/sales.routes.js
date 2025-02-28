@@ -383,6 +383,54 @@ module.exports = app => {
      *                   example: 500
      */
 
-      app.get(`${apiPrefix}/payment`, salesController.getPaymentData);
+      app.get(`${apiPrefix}/payment`, [authenticateToken],authenticateJWT, authorizeRoles(roles.ADMIN, roles.SALON_OWNER,roles.BARBER, roles.SALON_MANAGER),salesController.getPaymentData);
+
+
+      /**
+     * @swagger
+     * /api/sales/report:
+     *   get:
+     *     summary: Generate and download a sales report
+     *     description: Generates a sales report based on the selected filter (last 7 days or last 30 days) and uploads it to DigitalOcean Spaces.
+     *     tags: [Sales]
+     *     parameters:
+     *       - in: query
+     *         name: filter
+     *         schema:
+     *           type: string
+     *           enum: [last_7_days, last_30_days]
+     *         required: true
+     *         description: Filter option for the report (last 7 days or last 30 days)
+     *     responses:
+     *       200:
+     *         description: Sales report generated and uploaded successfully
+     *         content:
+     *           application/json:
+     *             schema:
+     *               type: object
+     *               properties:
+     *                 success:
+     *                   type: boolean
+     *                   example: true
+     *                 message:
+     *                   type: string
+     *                   example: Sales report with payment data generated and uploaded successfully
+     *                 data:
+     *                   type: object
+     *                   properties:
+     *                     downloadUrl:
+     *                       type: string
+     *                       example: "https://your-digitalocean-space-url/reports/sales_report.pdf"
+     *       400:
+     *         description: Invalid filter or bad request
+     *       401:
+     *         description: Unauthorized user
+     *       403:
+     *         description: Forbidden - User lacks necessary permissions
+     *       500:
+     *         description: Server error
+     */
+
+      app.get(`${apiPrefix}/report`, [authenticateToken],authenticateJWT, authorizeRoles(roles.ADMIN, roles.SALON_OWNER,roles.BARBER, roles.SALON_MANAGER),salesController.generateSalesReport);
     
 };
