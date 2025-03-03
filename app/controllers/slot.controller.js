@@ -6,7 +6,7 @@ const Salon = db.Salon;
 const Service = db.Service;
 const Slot =db.Slot;
 const moment = require('moment-timezone'); // Use Moment.js for time manipulation with timezones
-const userTimezone = 'Asia/Kolkata';
+const userTimezone = 'America/Toronto';
 
 
 exports.getAvailableSlots = async (req, res) => {
@@ -19,8 +19,8 @@ exports.getAvailableSlots = async (req, res) => {
       return sendResponse(res, false, 'BarberId and slot_date are required.', null, 400);
     }
 
-    // Get current time in Asia/Kolkata timezone and round to the nearest minute
-    //const currentTime = moment().tz('Asia/Kolkata') // Set timezone to Asia/Kolkata
+    // Get current time in 'America/Toronto' timezone and round to the nearest minute
+    //const currentTime = moment().tz('America/Toronto') // Set timezone to 'America/Toronto'
     const currentTime = moment.tz(new Date(), userTimezone);
 
     // Construct filters for Slot query
@@ -67,10 +67,10 @@ exports.getAvailableSlots = async (req, res) => {
         };
       }
 
-      // Convert slot start time to Asia/Kolkata timezone
+      // Convert slot start time to 'America/Toronto' timezone
       const slotStartTime = moment.tz(`${slot.slot_date} ${slot.start_time}`, userTimezone);
       
-      // Check if the slot start time is after the current time (in Asia/Kolkata timezone)
+      // Check if the slot start time is after the current time (in 'America/Toronto' timezone)
       if (slotStartTime.isAfter(currentTime)) {
         acc[barberSessionId].slots.push({
           id: slot.id,

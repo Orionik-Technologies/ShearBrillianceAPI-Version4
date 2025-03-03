@@ -72,7 +72,7 @@ class SaloonOpenCloseManager {
                 console.log("Salon status cron skipped as it's outside allowed hours.");
             }
         }, {
-            timezone: "Asia/Kolkata"
+            timezone: "America/Toronto"
         });
     }
 }

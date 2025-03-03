@@ -15,9 +15,9 @@ const User = db.USER;
 const Salon = db.Salon;
 const Service = db.Service;
 const Slot = db.Slot;
+const userTimezone = 'America/Toronto';
 const BarberService = db.BarberService;
 
-const userTimezone = 'Asia/Kolkata';
 const moment = require('moment');
 
 const SLOT_DURATION = 15; // minutes
