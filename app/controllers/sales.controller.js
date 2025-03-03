@@ -788,6 +788,8 @@ function formatSalesData(data, startDate, endDate) {
         result.push({
             date: dateStr,
             appointments: dateMap.get(dateStr)?.appointments || 0
+            appointments: dateMap.get(dateStr)?.appointments || 0,
+            revenue: dateMap.get(dateStr)?.revenue || '0.00'
         });
         current.add(1, 'day');
     }
