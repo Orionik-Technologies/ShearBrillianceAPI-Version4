@@ -560,7 +560,7 @@ exports.generateSalesReport = async (req, res) => {
                     paymentStatus: 'Success',
                     createdAt: { [Op.between]: [reportStartDate, reportEndDate] },
                     appointmentId: {
-                        [Op.in]: db.Sequelize.literal(`(SELECT id FROM Appointments WHERE SalonId = ${req.user.salonId})`)
+                        [Op.in]: db.Sequelize.literal(`(SELECT id FROM Appointments WHERE SalonId = ${req.user.salonId} AND status = 'completed')`)
                     }
                 },
                 group: [db.Sequelize.fn('DATE', db.Sequelize.col('Payment.createdAt'))],
@@ -568,19 +568,9 @@ exports.generateSalesReport = async (req, res) => {
                 raw: true,
             });
         }
-
-        // Fetch salon names
-        const salonIds = [...new Set(salesData.map(item => item.SalonId))];
-        const salons = await Salon.findAll({
-            where: { id: salonIds },
-            attributes: ['id', 'name'],
-            raw: true
-        });
-        const salonMap = salons.reduce((acc, salon) => {
-            acc[salon.id] = salon.name;
-            return acc;
-        }, {});
-
+        
+        // ... (salon name fetching remains unchanged)
+        
         // Group sales data by salon and date
         const groupedSalesData = {};
         salesData.forEach(entry => {
@@ -592,12 +582,12 @@ exports.generateSalesReport = async (req, res) => {
                 groupedSalesData[entry.SalonId][normalizedDate] = [];
             }
             groupedSalesData[entry.SalonId][normalizedDate].push({
-                appointments: entry.appointments,
+                appointments: parseInt(entry.appointments), // Ensure integer
                 paymentMode: entry.paymentMode,
-                revenue: entry.revenue || 0
+                revenue: parseFloat(entry.revenue || 0).toFixed(2) // Ensure float
             });
         });
-
+        
         // Format sales data per salon and calculate totals
         const formattedDataBySalon = {};
         Object.keys(groupedSalesData).forEach(salonId => {
@@ -610,7 +600,7 @@ exports.generateSalesReport = async (req, res) => {
                 reportStartDate,
                 reportEndDate
             );
-
+        
             formattedDataBySalon[salonId] = {
                 dailyData: formattedDates.map(dateEntry => ({
                     ...dateEntry,
@@ -622,14 +612,14 @@ exports.generateSalesReport = async (req, res) => {
                 }
             };
         });
-
+        
         // Process payment data
         const paymentMap = {};
         paymentData.forEach(payment => {
             const normalizedDate = moment.tz(payment.date, timezone).format('YYYY-MM-DD');
             paymentMap[normalizedDate] = parseFloat(payment.totalPayment || 0).toFixed(2);
         });
-
+        
         // Combine with payment data and calculate totals
         Object.keys(formattedDataBySalon).forEach(salonId => {
             formattedDataBySalon[salonId].dailyData = formattedDataBySalon[salonId].dailyData.map(entry => {
@@ -643,6 +633,20 @@ exports.generateSalesReport = async (req, res) => {
             });
             formattedDataBySalon[salonId].totals.totalPayment = formattedDataBySalon[salonId].totals.totalPayment.toFixed(2);
         });
+
+        const salonIds = [...new Set(salesData.map(item => item.SalonId))];
+        const salons = await Salon.findAll({
+            where: { id: salonIds },
+            attributes: ['id', 'name'],
+            raw: true
+        });
+        const salonMap = salons.reduce((acc, salon) => {
+            acc[salon.id] = salon.name;
+            return acc;
+        }, {});
+        
+        // Add debugging logs
+        console.log('Formatted Data:', JSON.stringify(formattedDataBySalon, null, 2));
 
         // Generate HTML content
         const htmlContent = generateHTMLReport(formattedDataBySalon, salonMap, start, end, timezone);
