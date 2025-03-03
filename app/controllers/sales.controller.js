@@ -17,7 +17,8 @@ const path = require('path');
 const sendResponse = require('../helpers/responseHelper');  // Import the helper
 const { put } = require('@vercel/blob'); // Import 'put' directly if using Vercel's blob SDK upload method
 const AWS = require('aws-sdk');
-const userTimezone = 'America/Toronto';
+const userTimezone = 'Asia/Kolkata';
+const puppeteer = require('puppeteer');
 
 const s3 = new AWS.S3({
     endpoint: new AWS.Endpoint('https://tor1.digitaloceanspaces.com'), // Replace with your DigitalOcean Spaces endpoint
@@ -449,7 +450,7 @@ exports.getPaymentData = async (req, res) => {
 };
 
 
-exports.shareSalesData = async (req, res) => {
+exports.generateSalesReport = async (req, res) => {
     const { startDate, endDate } = req.query;
 
     try {
@@ -471,7 +472,7 @@ exports.shareSalesData = async (req, res) => {
             return res.status(400).json({ success: false, message: 'startDate and endDate are required' });
         }
 
-        const timezone = 'America/Toronto'; // Change this to your local timezone, e.g., 'America/New_York'
+        const timezone = 'Asia/Kolkata';
         const start = moment.tz(startDate, 'YYYY-MM-DD', timezone).startOf('day');
         const end = moment.tz(endDate, 'YYYY-MM-DD', timezone).endOf('day');
 
@@ -559,7 +560,7 @@ exports.shareSalesData = async (req, res) => {
                     paymentStatus: 'Success',
                     createdAt: { [Op.between]: [reportStartDate, reportEndDate] },
                     appointmentId: {
-                        [Op.in]: db.Sequelize.literal(`(SELECT id FROM Appointments WHERE SalonId = ${req.user.salonId})`)
+                        [Op.in]: db.Sequelize.literal(`(SELECT id FROM Appointments WHERE SalonId = ${req.user.salonId} AND status = 'completed')`)
                     }
                 },
                 group: [db.Sequelize.fn('DATE', db.Sequelize.col('Payment.createdAt'))],
@@ -567,8 +568,72 @@ exports.shareSalesData = async (req, res) => {
                 raw: true,
             });
         }
+        
+        // ... (salon name fetching remains unchanged)
+        
+        // Group sales data by salon and date
+        const groupedSalesData = {};
+        salesData.forEach(entry => {
+            const normalizedDate = moment.tz(entry.date, timezone).format('YYYY-MM-DD');
+            if (!groupedSalesData[entry.SalonId]) {
+                groupedSalesData[entry.SalonId] = {};
+            }
+            if (!groupedSalesData[entry.SalonId][normalizedDate]) {
+                groupedSalesData[entry.SalonId][normalizedDate] = [];
+            }
+            groupedSalesData[entry.SalonId][normalizedDate].push({
+                appointments: parseInt(entry.appointments), // Ensure integer
+                paymentMode: entry.paymentMode,
+                revenue: parseFloat(entry.revenue || 0).toFixed(2) // Ensure float
+            });
+        });
+        
+        // Format sales data per salon and calculate totals
+        const formattedDataBySalon = {};
+        Object.keys(groupedSalesData).forEach(salonId => {
+            const dates = Object.keys(groupedSalesData[salonId]).sort();
+            const formattedDates = formatSalesData(
+                dates.map(date => ({
+                    date,
+                    appointments: groupedSalesData[salonId][date].reduce((sum, e) => sum + e.appointments, 0)
+                })),
+                reportStartDate,
+                reportEndDate
+            );
+        
+            formattedDataBySalon[salonId] = {
+                dailyData: formattedDates.map(dateEntry => ({
+                    ...dateEntry,
+                    details: groupedSalesData[salonId][dateEntry.date] || [],
+                })),
+                totals: {
+                    totalAppointments: 0,
+                    totalPayment: 0
+                }
+            };
+        });
+        
+        // Process payment data
+        const paymentMap = {};
+        paymentData.forEach(payment => {
+            const normalizedDate = moment.tz(payment.date, timezone).format('YYYY-MM-DD');
+            paymentMap[normalizedDate] = parseFloat(payment.totalPayment || 0).toFixed(2);
+        });
+        
+        // Combine with payment data and calculate totals
+        Object.keys(formattedDataBySalon).forEach(salonId => {
+            formattedDataBySalon[salonId].dailyData = formattedDataBySalon[salonId].dailyData.map(entry => {
+                const totalPayment = paymentMap[entry.date] || '0.00';
+                formattedDataBySalon[salonId].totals.totalAppointments += entry.appointments;
+                formattedDataBySalon[salonId].totals.totalPayment += parseFloat(totalPayment);
+                return {
+                    ...entry,
+                    totalPayment
+                };
+            });
+            formattedDataBySalon[salonId].totals.totalPayment = formattedDataBySalon[salonId].totals.totalPayment.toFixed(2);
+        });
 
-        // Fetch salon names
         const salonIds = [...new Set(salesData.map(item => item.SalonId))];
         const salons = await Salon.findAll({
             where: { id: salonIds },
@@ -579,29 +644,36 @@ exports.shareSalesData = async (req, res) => {
             acc[salon.id] = salon.name;
             return acc;
         }, {});
+        
+        // Add debugging logs
+        console.log('Formatted Data:', JSON.stringify(formattedDataBySalon, null, 2));
 
-        // Structure the response data
-        const responseData = {
-            period: {
-                startDate: start.format('YYYY-MM-DD'),
-                endDate: end.format('YYYY-MM-DD'),
-                timezone: timezone
-            },
-            salons: salons,
-            salesData: salesData.map(item => ({
-                salonId: item.SalonId,
-                salonName: salonMap[item.SalonId] || `ID ${item.SalonId}`,
-                date: item.date,
-                appointments: item.appointments,
-                revenue: item.revenue || 0,
-                paymentMode: item.paymentMode === 'Pay_In_Person' ? 'Offline' : 
-                           item.paymentMode === 'Pay_Online' ? 'Online' : 'N/A'
-            })),
-            paymentData: paymentData.map(item => ({
-                date: item.date,
-                totalPayment: parseFloat(item.totalPayment || 0).toFixed(2)
-            })),
-            generatedAt: moment().tz(timezone).format('YYYY-MM-DD HH:mm:ss')
+        // Generate HTML content
+        const htmlContent = generateHTMLReport(formattedDataBySalon, salonMap, start, end, timezone);
+
+        // Generate PDF using Puppeteer
+        const browser = await puppeteer.launch({ headless: 'new' });
+        const page = await browser.newPage();
+        await page.setContent(htmlContent);
+        const fileName = `sales_report_${start.format('YYYYMMDD')}_to_${end.format('YYYYMMDD')}_${Date.now()}.pdf`;
+        const filePath = path.join(__dirname, fileName);
+
+        await page.pdf({
+            path: filePath,
+            format: 'A4',
+            printBackground: true,
+            margin: { top: '20mm', bottom: '20mm', left: '15mm', right: '15mm' }
+        });
+        await browser.close();
+
+        // Upload to S3
+        const fileBuffer = fs.readFileSync(filePath);
+        const uploadParams = {
+            Bucket: process.env.DO_SPACES_BUCKET,
+            Key: `reports/${fileName}`,
+            Body: fileBuffer,
+            ACL: 'public-read',
+            ContentType: 'application/pdf',
         };
 
         res.json({
@@ -615,3 +687,93 @@ exports.shareSalesData = async (req, res) => {
         res.status(500).json({ success: false, message: 'Server Error' });
     }
 };
+
+// Helper function to generate HTML content
+function generateHTMLReport(formattedDataBySalon, salonMap, start, end, timezone) {
+    let html = `
+        <html>
+        <head>
+            <style>
+                body { font-family: Arial, sans-serif; margin: 0; padding: 20px; }
+                h1 { text-align: center; color: #333; }
+                h2 { color: #555; }
+                table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+                th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+                th { background-color: #f2f2f2; }
+                .totals { font-weight: bold; margin-top: 10px; }
+                .header { margin-bottom: 20px; }
+                .date { font-size: 0.9em; color: #666; }
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h1>Shear Brilliance Sales Report</h1>
+                <p class="date">${start.format('YYYY-MM-DD')} to ${end.format('YYYY-MM-DD')}</p>
+                <p class="date">Generated on: ${moment().tz(timezone).format('MMMM Do YYYY, h:mm:ss a')}</p>
+            </div>
+    `;
+
+    for (const [salonId, salonData] of Object.entries(formattedDataBySalon)) {
+        html += `
+            <h2>Salon: ${salonMap[salonId] || `ID ${salonId}`}</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Appointments</th>
+                        <th>Payment Mode</th>
+                        <th>Total Payment</th>
+                    </tr>
+                </thead>
+                <tbody>
+        `;
+
+        salonData.dailyData.forEach(entry => {
+            entry.details.forEach((detail, index) => {
+                const paymentModeStr = detail.paymentMode === 'Pay_In_Person' ? 'Offline' :
+                                       detail.paymentMode === 'Pay_Online' ? 'Online' : 'N/A';
+                html += `
+                    <tr>
+                        ${index === 0 ? `<td rowspan="${entry.details.length}">${entry.date}</td>` : ''}
+                        <td>${detail.appointments}</td>
+                        <td>${paymentModeStr}</td>
+                        ${index === 0 ? `<td rowspan="${entry.details.length}">$${entry.totalPayment}</td>` : ''}
+                    </tr>
+                `;
+            });
+        });
+
+        html += `
+                </tbody>
+            </table>
+            <div class="totals">
+                <p>Total Appointments: ${salonData.totals.totalAppointments}</p>
+                <p>Total Payment: $${salonData.totals.totalPayment}</p>
+            </div>
+        `;
+    }
+
+    html += `
+        </body>
+        </html>
+    `;
+    return html;
+}
+
+// Helper function to fill in missing dates (unchanged)
+function formatSalesData(data, startDate, endDate) {
+    const dateMap = new Map(data.map(d => [d.date, d]));
+    const result = [];
+    const current = moment(startDate);
+    const end = moment(endDate);
+
+    while (current.isSameOrBefore(end, 'day')) {
+        const dateStr = current.format('YYYY-MM-DD');
+        result.push({
+            date: dateStr,
+            appointments: dateMap.get(dateStr)?.appointments || 0
+        });
+        current.add(1, 'day');
+    }
+    return result;
+}
