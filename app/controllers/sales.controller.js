@@ -449,7 +449,7 @@ exports.getPaymentData = async (req, res) => {
 };
 
 
-exports.generateSalesReport = async (req, res) => {
+exports.shareSalesData = async (req, res) => {
     const { startDate, endDate } = req.query;
 
     try {
@@ -471,7 +471,7 @@ exports.generateSalesReport = async (req, res) => {
             return res.status(400).json({ success: false, message: 'startDate and endDate are required' });
         }
 
-        const timezone = 'Asia/Kolkata'; // Change this to your local timezone, e.g., 'America/New_York'
+        const timezone = 'Asia/Kolkata';
         const start = moment.tz(startDate, 'YYYY-MM-DD', timezone).startOf('day');
         const end = moment.tz(endDate, 'YYYY-MM-DD', timezone).endOf('day');
 
@@ -580,150 +580,38 @@ exports.generateSalesReport = async (req, res) => {
             return acc;
         }, {});
 
-        // Group sales data by salon and date with consistent formatting
-        const groupedSalesData = {};
-        salesData.forEach(entry => {
-            const normalizedDate = moment.tz(entry.date, timezone).format('YYYY-MM-DD');
-            if (!groupedSalesData[entry.SalonId]) {
-                groupedSalesData[entry.SalonId] = {};
-            }
-            if (!groupedSalesData[entry.SalonId][normalizedDate]) {
-                groupedSalesData[entry.SalonId][normalizedDate] = [];
-            }
-            groupedSalesData[entry.SalonId][normalizedDate].push({
-                appointments: entry.appointments,
-                paymentMode: entry.paymentMode,
-                revenue: entry.revenue || 0
-            });
-        });
-
-        // Format sales data per salon and calculate totals
-        const formattedDataBySalon = {};
-        Object.keys(groupedSalesData).forEach(salonId => {
-            const dates = Object.keys(groupedSalesData[salonId]).sort();
-            const formattedDates = formatSalesData(
-                dates.map(date => ({
-                    date,
-                    appointments: groupedSalesData[salonId][date].reduce((sum, e) => sum + e.appointments, 0)
-                })),
-                reportStartDate,
-                reportEndDate
-            );
-
-            formattedDataBySalon[salonId] = {
-                dailyData: formattedDates.map(dateEntry => ({
-                    ...dateEntry,
-                    details: groupedSalesData[salonId][dateEntry.date] || [],
-                })),
-                totals: {
-                    totalAppointments: 0,
-                    totalPayment: 0
-                }
-            };
-        });
-
-        // Process payment data with consistent formatting
-        const paymentMap = {};
-        paymentData.forEach(payment => {
-            const normalizedDate = moment.tz(payment.date, timezone).format('YYYY-MM-DD');
-            paymentMap[normalizedDate] = parseFloat(payment.totalPayment || 0).toFixed(2);
-        });
-
-        // Combine with payment data and calculate totals
-        Object.keys(formattedDataBySalon).forEach(salonId => {
-            formattedDataBySalon[salonId].dailyData = formattedDataBySalon[salonId].dailyData.map(entry => {
-                const totalPayment = paymentMap[entry.date] || '0.00';
-                formattedDataBySalon[salonId].totals.totalAppointments += entry.appointments;
-                formattedDataBySalon[salonId].totals.totalPayment += parseFloat(totalPayment);
-                return {
-                    ...entry,
-                    totalPayment
-                };
-            });
-            formattedDataBySalon[salonId].totals.totalPayment = formattedDataBySalon[salonId].totals.totalPayment.toFixed(2);
-        });
-
-        // Generate PDF
-        const doc = new PDFDocument();
-        const fileName = `sales_report_${start.format('YYYYMMDD')}_to_${end.format('YYYYMMDD')}_${Date.now()}.pdf`;
-        const filePath = path.join(__dirname, fileName);
-
-        const stream = fs.createWriteStream(filePath);
-        doc.pipe(stream);
-
-        const reportTitle = `Shear Brilliance Sales Report ${start.format('YYYY-MM-DD')} to ${end.format('YYYY-MM-DD')}`;
-        doc.fontSize(16).text(reportTitle, { align: 'center' });
-        doc.moveDown();
-        doc.fontSize(12).text(`Generated on: ${moment().tz(timezone).format('MMMM Do YYYY, h:mm:ss a')}`);
-        doc.moveDown();
-
-        // Print data for each salon
-        for (const [salonId, salonData] of Object.entries(formattedDataBySalon)) {
-            doc.fontSize(14).text(`Salon: ${salonMap[salonId] || `ID ${salonId}`}`, { underline: true });
-            doc.moveDown();
-            doc.fontSize(12).text('Date       | Appointments | Payment Mode       | Total Payment', { underline: true });
-
-            salonData.dailyData.forEach(entry => {
-                let isFirstEntryForDate = true;
-                entry.details.forEach(detail => {
-                    const appointmentsStr = String(detail.appointments).padEnd(12);
-                    const paymentModeStr = detail.paymentMode === 'Pay_In_Person' ? 'Offline' : 
-                                         detail.paymentMode === 'Pay_Online' ? 'Online' : 'N/A';
-                    const paymentStr = isFirstEntryForDate ? `$${entry.totalPayment}` : '';
-                    doc.text(`${entry.date} |       ${appointmentsStr} |         ${paymentModeStr} |         ${paymentStr}`);
-                    isFirstEntryForDate = false;
-                });
-            });
-
-            doc.moveDown();
-            doc.fontSize(12).text('Totals', { underline: true });
-            doc.text(`Total Payment: $${salonData.totals.totalPayment}`);
-            doc.moveDown();
-        }
-
-        doc.end();
-
-        await new Promise((resolve) => stream.on('finish', resolve));
-
-        const fileBuffer = fs.readFileSync(filePath);
-        const uploadParams = {
-            Bucket: process.env.DO_SPACES_BUCKET,
-            Key: `reports/${fileName}`,
-            Body: fileBuffer,
-            ACL: 'public-read',
-            ContentType: 'application/pdf',
+        // Structure the response data
+        const responseData = {
+            period: {
+                startDate: start.format('YYYY-MM-DD'),
+                endDate: end.format('YYYY-MM-DD'),
+                timezone: timezone
+            },
+            salons: salons,
+            salesData: salesData.map(item => ({
+                salonId: item.SalonId,
+                salonName: salonMap[item.SalonId] || `ID ${item.SalonId}`,
+                date: item.date,
+                appointments: item.appointments,
+                revenue: item.revenue || 0,
+                paymentMode: item.paymentMode === 'Pay_In_Person' ? 'Offline' : 
+                           item.paymentMode === 'Pay_Online' ? 'Online' : 'N/A'
+            })),
+            paymentData: paymentData.map(item => ({
+                date: item.date,
+                totalPayment: parseFloat(item.totalPayment || 0).toFixed(2)
+            })),
+            generatedAt: moment().tz(timezone).format('YYYY-MM-DD HH:mm:ss')
         };
-
-        const uploadResult = await s3.upload(uploadParams).promise();
-        const downloadUrl = uploadResult.Location;
-
-        fs.unlinkSync(filePath);
 
         res.json({
             success: true,
-            message: 'Sales report with payment data generated and uploaded successfully',
-            data: { downloadUrl },
+            message: 'Sales data retrieved successfully',
+            data: responseData
         });
+
     } catch (error) {
-        console.error('Error generating sales report:', error);
+        console.error('Error sharing sales data:', error);
         res.status(500).json({ success: false, message: 'Server Error' });
     }
 };
-
-// Helper function to fill in missing dates
-function formatSalesData(data, startDate, endDate) {
-    const dateMap = new Map(data.map(d => [d.date, d]));
-    const result = [];
-    const current = moment(startDate);
-    const end = moment(endDate);
-
-    while (current.isSameOrBefore(end, 'day')) {
-        const dateStr = current.format('YYYY-MM-DD');
-        result.push({
-            date: dateStr,
-            appointments: dateMap.get(dateStr)?.appointments || 0
-        });
-        current.add(1, 'day');
-    }
-    return result;
-}
