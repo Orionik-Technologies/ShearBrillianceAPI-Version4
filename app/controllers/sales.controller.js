@@ -645,8 +645,6 @@ exports.generateSalesReport = async (req, res) => {
             return acc;
         }, {});
         
-        // Add debugging logs
-        console.log('Formatted Data:', JSON.stringify(formattedDataBySalon, null, 2));
 
         // Generate HTML content
         const htmlContent = generateHTMLReport(formattedDataBySalon, salonMap, start, end, timezone);
