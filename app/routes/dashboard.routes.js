@@ -447,4 +447,79 @@ module.exports = app => {
    
    app.get(`${apiPrefix}/newCustomers`, [authenticateToken, authenticateJWT], dashboardController.GetnewCustomers);
 
+
+
+     /**
+ * @swagger
+ * /api/dashboard/customer-status:
+ *   get:
+ *     summary: Retrieve aggregated customer status counts
+ *     tags: [Dashboard]
+ *     parameters:
+ *       - in: query
+ *         name: filter
+ *         required: true
+ *         schema:
+ *           type: string
+ *           enum: [today, last_7_days, last_30_days]
+ *         description: Filter to specify the date range (e.g., 'today', 'last_7_days', 'last_30_days').
+ *     responses:
+ *       200:
+ *         description: Successfully retrieved customer status counts.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Get customer status successfully !!!"
+ *                 response:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       status:
+ *                         type: string
+ *                         example: "completed"
+ *                       count:
+ *                         type: integer
+ *                         example: 5
+ *                 code:
+ *                   type: integer
+ *                   example: 200
+ *       400:
+ *         description: Invalid filter specified.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: string
+ *                   example: "Invalid filter"
+ *       403:
+ *         description: Unauthorized access.
+ *       500:
+ *         description: Server error.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Server Error"
+ *                 code:
+ *                   type: integer
+ *                   example: 500
+ */
+   app.get(`${apiPrefix}/customer-status`, [authenticateToken, authenticateJWT], dashboardController.customerStatus);
+
 };
