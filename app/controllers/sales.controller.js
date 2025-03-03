@@ -781,3 +781,4 @@ function formatSalesData(data, startDate, endDate) {
     }
     return result;
 }
+
