@@ -385,59 +385,111 @@ module.exports = app => {
 
       app.get(`${apiPrefix}/payment`, [authenticateToken],authenticateJWT, authorizeRoles(roles.ADMIN, roles.SALON_OWNER,roles.BARBER, roles.SALON_MANAGER),salesController.getPaymentData);
 
-    /**
-     * @swagger
-     * /api/sales/report:
-     *   get:
-     *     summary: Generate and download a sales report
-     *     description: Generates a sales report based on a custom date range specified by startDate and endDate, and uploads it to DigitalOcean Spaces.
-     *     tags: [Sales]
-     *     parameters:
-     *       - in: query
-     *         name: startDate
-     *         schema:
-     *           type: string
-     *           format: date
-     *           example: "2025-02-01"
-     *         required: true
-     *         description: Start date of the report (YYYY-MM-DD).
-     *       - in: query
-     *         name: endDate
-     *         schema:
-     *           type: string
-     *           format: date
-     *           example: "2025-02-28"
-     *         required: true
-     *         description: End date of the report (YYYY-MM-DD).
-     *     responses:
-     *       200:
-     *         description: Sales report generated and uploaded successfully
-     *         content:
-     *           application/json:
-     *             schema:
-     *               type: object
-     *               properties:
-     *                 success:
-     *                   type: boolean
-     *                   example: true
-     *                 message:
-     *                   type: string
-     *                   example: Sales report with payment data generated and uploaded successfully
-     *                 data:
-     *                   type: object
-     *                   properties:
-     *                     downloadUrl:
-     *                       type: string
-     *                       example: "https://your-digitalocean-space-url/reports/sales_report.pdf"
-     *       400:
-     *         description: Missing or invalid startDate/endDate
-     *       401:
-     *         description: Unauthorized user
-     *       403:
-     *         description: Forbidden - User lacks necessary permissions
-     *       500:
-     *         description: Server error
-     */
+   /**
+   * @swagger
+   * /api/sales/report:
+   *   get:
+   *     summary: Generate and download a sales report
+   *     description: Generates a sales report in PDF format based on a custom date range (startDate and endDate), formatted using HTML for a user-friendly layout, and uploads it to DigitalOcean Spaces. The report includes appointment counts, payment modes, and total payments, tailored to the user's role (Admin or Salon Manager).
+   *     tags: [Sales]
+   *     parameters:
+   *       - in: query
+   *         name: startDate
+   *         schema:
+   *           type: string
+   *           format: date
+   *           example: "2025-02-01"
+   *         required: true
+   *         description: Start date of the report in YYYY-MM-DD format (e.g., 2025-02-01). Must be a valid date and earlier than or equal to endDate.
+   *       - in: query
+   *         name: endDate
+   *         schema:
+   *           type: string
+   *           format: date
+   *           example: "2025-02-28"
+   *         required: true
+   *         description: End date of the report in YYYY-MM-DD format (e.g., 2025-02-28). Must be a valid date and later than or equal to startDate.
+   *     responses:
+   *       200:
+   *         description: Sales report generated and uploaded successfully
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: true
+   *                   description: Indicates the operation was successful
+   *                 message:
+   *                   type: string
+   *                   example: "Sales report with payment data generated and uploaded successfully"
+   *                   description: A success message describing the outcome
+   *                 data:
+   *                   type: object
+   *                   properties:
+   *                     downloadUrl:
+   *                       type: string
+   *                       example: "https://your-space-name.s3.region.digitaloceanspaces.com/reports/sales_report_20250201_to_20250228_1698765432100.pdf"
+   *                       description: Public URL to download the generated PDF report from DigitalOcean Spaces
+   *       400:
+   *         description: Bad request - Missing or invalid startDate/endDate
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: false
+   *                 message:
+   *                   type: string
+   *                   example: "startDate and endDate are required" 
+   *                   description: Error message indicating missing or invalid date parameters
+   *       401:
+   *         description: Unauthorized - No user ID found or invalid authentication
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: false
+   *                 message:
+   *                   type: string
+   *                   example: "Unauthorized: No user ID found"
+   *                 code:
+   *                   type: integer
+   *                   example: 401
+   *       403:
+   *         description: Forbidden - User lacks necessary permissions or role not found
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: false
+   *                 message:
+   *                   type: string
+   *                   example: "Unauthorized User"
+   *       500:
+   *         description: Internal server error
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: false
+   *                 message:
+   *                   type: string
+   *                   example: "Server Error"
+   *                   description: Generic error message for unexpected server issues
+   */
       app.get(`${apiPrefix}/report`, [authenticateToken],authenticateJWT, authorizeRoles(roles.ADMIN, roles.SALON_OWNER,roles.BARBER, roles.SALON_MANAGER),salesController.generateSalesReport);
     
 };

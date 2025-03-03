@@ -18,6 +18,7 @@ const sendResponse = require('../helpers/responseHelper');  // Import the helper
 const { put } = require('@vercel/blob'); // Import 'put' directly if using Vercel's blob SDK upload method
 const AWS = require('aws-sdk');
 const userTimezone = 'Asia/Kolkata';
+const puppeteer = require('puppeteer');
 
 const s3 = new AWS.S3({
     endpoint: new AWS.Endpoint('https://tor1.digitaloceanspaces.com'), // Replace with your DigitalOcean Spaces endpoint
@@ -471,7 +472,7 @@ exports.generateSalesReport = async (req, res) => {
             return res.status(400).json({ success: false, message: 'startDate and endDate are required' });
         }
 
-        const timezone = 'Asia/Kolkata'; // Change this to your local timezone, e.g., 'America/New_York'
+        const timezone = 'Asia/Kolkata';
         const start = moment.tz(startDate, 'YYYY-MM-DD', timezone).startOf('day');
         const end = moment.tz(endDate, 'YYYY-MM-DD', timezone).endOf('day');
 
@@ -580,7 +581,7 @@ exports.generateSalesReport = async (req, res) => {
             return acc;
         }, {});
 
-        // Group sales data by salon and date with consistent formatting
+        // Group sales data by salon and date
         const groupedSalesData = {};
         salesData.forEach(entry => {
             const normalizedDate = moment.tz(entry.date, timezone).format('YYYY-MM-DD');
@@ -622,7 +623,7 @@ exports.generateSalesReport = async (req, res) => {
             };
         });
 
-        // Process payment data with consistent formatting
+        // Process payment data
         const paymentMap = {};
         paymentData.forEach(payment => {
             const normalizedDate = moment.tz(payment.date, timezone).format('YYYY-MM-DD');
@@ -643,48 +644,25 @@ exports.generateSalesReport = async (req, res) => {
             formattedDataBySalon[salonId].totals.totalPayment = formattedDataBySalon[salonId].totals.totalPayment.toFixed(2);
         });
 
-        // Generate PDF
-        const doc = new PDFDocument();
+        // Generate HTML content
+        const htmlContent = generateHTMLReport(formattedDataBySalon, salonMap, start, end, timezone);
+
+        // Generate PDF using Puppeteer
+        const browser = await puppeteer.launch({ headless: 'new' });
+        const page = await browser.newPage();
+        await page.setContent(htmlContent);
         const fileName = `sales_report_${start.format('YYYYMMDD')}_to_${end.format('YYYYMMDD')}_${Date.now()}.pdf`;
         const filePath = path.join(__dirname, fileName);
 
-        const stream = fs.createWriteStream(filePath);
-        doc.pipe(stream);
+        await page.pdf({
+            path: filePath,
+            format: 'A4',
+            printBackground: true,
+            margin: { top: '20mm', bottom: '20mm', left: '15mm', right: '15mm' }
+        });
+        await browser.close();
 
-        const reportTitle = `Shear Brilliance Sales Report ${start.format('YYYY-MM-DD')} to ${end.format('YYYY-MM-DD')}`;
-        doc.fontSize(16).text(reportTitle, { align: 'center' });
-        doc.moveDown();
-        doc.fontSize(12).text(`Generated on: ${moment().tz(timezone).format('MMMM Do YYYY, h:mm:ss a')}`);
-        doc.moveDown();
-
-        // Print data for each salon
-        for (const [salonId, salonData] of Object.entries(formattedDataBySalon)) {
-            doc.fontSize(14).text(`Salon: ${salonMap[salonId] || `ID ${salonId}`}`, { underline: true });
-            doc.moveDown();
-            doc.fontSize(12).text('Date       | Appointments | Payment Mode       | Total Payment', { underline: true });
-
-            salonData.dailyData.forEach(entry => {
-                let isFirstEntryForDate = true;
-                entry.details.forEach(detail => {
-                    const appointmentsStr = String(detail.appointments).padEnd(12);
-                    const paymentModeStr = detail.paymentMode === 'Pay_In_Person' ? 'Offline' : 
-                                         detail.paymentMode === 'Pay_Online' ? 'Online' : 'N/A';
-                    const paymentStr = isFirstEntryForDate ? `$${entry.totalPayment}` : '';
-                    doc.text(`${entry.date} |       ${appointmentsStr} |         ${paymentModeStr} |         ${paymentStr}`);
-                    isFirstEntryForDate = false;
-                });
-            });
-
-            doc.moveDown();
-            doc.fontSize(12).text('Totals', { underline: true });
-            doc.text(`Total Payment: $${salonData.totals.totalPayment}`);
-            doc.moveDown();
-        }
-
-        doc.end();
-
-        await new Promise((resolve) => stream.on('finish', resolve));
-
+        // Upload to S3
         const fileBuffer = fs.readFileSync(filePath);
         const uploadParams = {
             Bucket: process.env.DO_SPACES_BUCKET,
@@ -710,7 +688,79 @@ exports.generateSalesReport = async (req, res) => {
     }
 };
 
-// Helper function to fill in missing dates
+// Helper function to generate HTML content
+function generateHTMLReport(formattedDataBySalon, salonMap, start, end, timezone) {
+    let html = `
+        <html>
+        <head>
+            <style>
+                body { font-family: Arial, sans-serif; margin: 0; padding: 20px; }
+                h1 { text-align: center; color: #333; }
+                h2 { color: #555; }
+                table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+                th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+                th { background-color: #f2f2f2; }
+                .totals { font-weight: bold; margin-top: 10px; }
+                .header { margin-bottom: 20px; }
+                .date { font-size: 0.9em; color: #666; }
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h1>Shear Brilliance Sales Report</h1>
+                <p class="date">${start.format('YYYY-MM-DD')} to ${end.format('YYYY-MM-DD')}</p>
+                <p class="date">Generated on: ${moment().tz(timezone).format('MMMM Do YYYY, h:mm:ss a')}</p>
+            </div>
+    `;
+
+    for (const [salonId, salonData] of Object.entries(formattedDataBySalon)) {
+        html += `
+            <h2>Salon: ${salonMap[salonId] || `ID ${salonId}`}</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Appointments</th>
+                        <th>Payment Mode</th>
+                        <th>Total Payment</th>
+                    </tr>
+                </thead>
+                <tbody>
+        `;
+
+        salonData.dailyData.forEach(entry => {
+            entry.details.forEach((detail, index) => {
+                const paymentModeStr = detail.paymentMode === 'Pay_In_Person' ? 'Offline' :
+                                       detail.paymentMode === 'Pay_Online' ? 'Online' : 'N/A';
+                html += `
+                    <tr>
+                        ${index === 0 ? `<td rowspan="${entry.details.length}">${entry.date}</td>` : ''}
+                        <td>${detail.appointments}</td>
+                        <td>${paymentModeStr}</td>
+                        ${index === 0 ? `<td rowspan="${entry.details.length}">$${entry.totalPayment}</td>` : ''}
+                    </tr>
+                `;
+            });
+        });
+
+        html += `
+                </tbody>
+            </table>
+            <div class="totals">
+                <p>Total Appointments: ${salonData.totals.totalAppointments}</p>
+                <p>Total Payment: $${salonData.totals.totalPayment}</p>
+            </div>
+        `;
+    }
+
+    html += `
+        </body>
+        </html>
+    `;
+    return html;
+}
+
+// Helper function to fill in missing dates (unchanged)
 function formatSalesData(data, startDate, endDate) {
     const dateMap = new Map(data.map(d => [d.date, d]));
     const result = [];
