@@ -6,9 +6,9 @@ const sequelize = new Sequelize(dbConfig.DB, dbConfig.USER, dbConfig.PASSWORD, {
   port: 5432, // Port should be in the options object
   dialect: dbConfig.dialect,
   operatorsAliases: false,
-  timezone: '+05:30', // Adjust to your timezone offset (e.g., for IST)
+  timezone: 'America/Toronto', // Adjust to your timezone offset (e.g., for IST)
   dialectOptions: {
-    timezone: '+05:30',
+    timezone: 'America/Toronto', // Adjust to your timezone offset (e.g., for IST)
     ssl: {
       connectTimeout: 60000 ,
       require: true,

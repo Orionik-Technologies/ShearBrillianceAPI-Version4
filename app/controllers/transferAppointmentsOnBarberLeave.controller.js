@@ -12,6 +12,8 @@ const Slot = db.Slot;
 const BarberSession = db.BarberSession;
 const Salon = db.Salon; 
 const { sendEmail } = require("../services/emailService");
+const moment = require("moment");
+const userTimezone = 'America/Toronto';
 
 
 

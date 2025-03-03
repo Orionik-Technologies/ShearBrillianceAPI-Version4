@@ -17,7 +17,7 @@ const path = require('path');
 const sendResponse = require('../helpers/responseHelper');  // Import the helper
 const { put } = require('@vercel/blob'); // Import 'put' directly if using Vercel's blob SDK upload method
 const AWS = require('aws-sdk');
-const userTimezone = 'Asia/Kolkata';
+const userTimezone = 'America/Toronto';
 
 const s3 = new AWS.S3({
     endpoint: new AWS.Endpoint('https://tor1.digitaloceanspaces.com'), // Replace with your DigitalOcean Spaces endpoint
@@ -471,7 +471,7 @@ exports.shareSalesData = async (req, res) => {
             return res.status(400).json({ success: false, message: 'startDate and endDate are required' });
         }
 
-        const timezone = 'Asia/Kolkata';
+        const timezone = 'America/Toronto'; // Change this to your local timezone, e.g., 'America/New_York'
         const start = moment.tz(startDate, 'YYYY-MM-DD', timezone).startOf('day');
         const end = moment.tz(endDate, 'YYYY-MM-DD', timezone).endOf('day');
 

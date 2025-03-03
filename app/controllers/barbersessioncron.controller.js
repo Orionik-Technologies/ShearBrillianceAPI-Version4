@@ -659,7 +659,7 @@ exports.barbersessioncron = (io) => {
             console.error("Error in cron job:", error);
         }
     }, {
-        timezone: "Asia/Kolkata"
+        timezone: "America/Toronto"
     });
 };
 

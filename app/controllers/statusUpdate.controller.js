@@ -52,13 +52,13 @@ exports.statusUpdateCronJob = () => {
     console.log("Running cancelUnfinishedAppointments cron job at 11:00 PM...");
     cancelUnfinishedAppointments();
   }, {
-    timezone: "Asia/Kolkata" // Replace with your desired timezone
+    timezone: "America/Toronto" // Replace with your desired timezone
   });
 
   cron.schedule("30 23 * * *", () => {
     console.log("Running cancelUnfinishedAppointments cron job...");
     cancelUnfinishedAppointments();
   }, {
-    timezone: "Asia/Kolkata" // Replace with your desired timezone
+    timezone: "America/Toronto" // Replace with your desired timezone
   });
 }
