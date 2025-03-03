@@ -1349,13 +1349,8 @@ exports.customerStatus = async (req, res) => {
             }
         });
 
-        // **Total Customers** (All customers)
-        const totalCustomers = await User.count({
-            where: {
-                RoleId: customerRole.id,
-                ...whereCondition,
-            }
-        });
+       // **Total Customers** (All customers)
+       const totalCustomers = newCustomers + repeatedCustomers.length;
 
         // Step 4: Format response
         res.json({
