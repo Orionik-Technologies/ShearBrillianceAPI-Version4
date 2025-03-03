@@ -448,6 +448,7 @@ exports.getPaymentData = async (req, res) => {
     }
 };
 
+
 exports.generateSalesReport = async (req, res) => {
     const { startDate, endDate } = req.query;
 
@@ -465,13 +466,15 @@ exports.generateSalesReport = async (req, res) => {
         }
         const userRole = user.role.role_name;
 
-        // Validate startDate and endDate
+        // Validate and normalize dates
         if (!startDate || !endDate) {
             return res.status(400).json({ success: false, message: 'startDate and endDate are required' });
         }
 
-        const start = moment(startDate, 'YYYY-MM-DD', true);
-        const end = moment(endDate, 'YYYY-MM-DD', true);
+        const timezone = 'Asia/Kolkata'; // Change this to your local timezone, e.g., 'America/New_York'
+        const start = moment.tz(startDate, 'YYYY-MM-DD', timezone).startOf('day');
+        const end = moment.tz(endDate, 'YYYY-MM-DD', timezone).endOf('day');
+
         if (!start.isValid() || !end.isValid() || start.isAfter(end)) {
             return res.status(400).json({ success: false, message: 'Invalid date range' });
         }
@@ -577,16 +580,17 @@ exports.generateSalesReport = async (req, res) => {
             return acc;
         }, {});
 
-        // Group sales data by salon and date
+        // Group sales data by salon and date with consistent formatting
         const groupedSalesData = {};
         salesData.forEach(entry => {
+            const normalizedDate = moment.tz(entry.date, timezone).format('YYYY-MM-DD');
             if (!groupedSalesData[entry.SalonId]) {
                 groupedSalesData[entry.SalonId] = {};
             }
-            if (!groupedSalesData[entry.SalonId][entry.date]) {
-                groupedSalesData[entry.SalonId][entry.date] = [];
+            if (!groupedSalesData[entry.SalonId][normalizedDate]) {
+                groupedSalesData[entry.SalonId][normalizedDate] = [];
             }
-            groupedSalesData[entry.SalonId][entry.date].push({
+            groupedSalesData[entry.SalonId][normalizedDate].push({
                 appointments: entry.appointments,
                 paymentMode: entry.paymentMode,
                 revenue: entry.revenue || 0
@@ -618,10 +622,11 @@ exports.generateSalesReport = async (req, res) => {
             };
         });
 
-        // Process payment data
+        // Process payment data with consistent formatting
         const paymentMap = {};
         paymentData.forEach(payment => {
-            paymentMap[payment.date] = parseFloat(payment.totalPayment || 0).toFixed(2);
+            const normalizedDate = moment.tz(payment.date, timezone).format('YYYY-MM-DD');
+            paymentMap[normalizedDate] = parseFloat(payment.totalPayment || 0).toFixed(2);
         });
 
         // Combine with payment data and calculate totals
@@ -640,16 +645,16 @@ exports.generateSalesReport = async (req, res) => {
 
         // Generate PDF
         const doc = new PDFDocument();
-        const fileName = `sales_report_${moment(reportStartDate).format('YYYYMMDD')}_to_${moment(reportEndDate).format('YYYYMMDD')}_${Date.now()}.pdf`;
+        const fileName = `sales_report_${start.format('YYYYMMDD')}_to_${end.format('YYYYMMDD')}_${Date.now()}.pdf`;
         const filePath = path.join(__dirname, fileName);
 
         const stream = fs.createWriteStream(filePath);
         doc.pipe(stream);
 
-        const reportTitle = `Shear Brilliance Sales Report ${moment(reportStartDate).format('YYYY-MM-DD')} to ${moment(reportEndDate).format('YYYY-MM-DD')}`;
+        const reportTitle = `Shear Brilliance Sales Report ${start.format('YYYY-MM-DD')} to ${end.format('YYYY-MM-DD')}`;
         doc.fontSize(16).text(reportTitle, { align: 'center' });
         doc.moveDown();
-        doc.fontSize(12).text(`Generated on: ${moment().format('MMMM Do YYYY, h:mm:ss a')}`);
+        doc.fontSize(12).text(`Generated on: ${moment().tz(timezone).format('MMMM Do YYYY, h:mm:ss a')}`);
         doc.moveDown();
 
         // Print data for each salon
@@ -662,7 +667,8 @@ exports.generateSalesReport = async (req, res) => {
                 let isFirstEntryForDate = true;
                 entry.details.forEach(detail => {
                     const appointmentsStr = String(detail.appointments).padEnd(12);
-                    const paymentModeStr = detail.paymentMode === 'Pay_In_Person' ? 'Offline' : detail.paymentMode === 'Pay_Online' ? 'Online' : 'N/A';
+                    const paymentModeStr = detail.paymentMode === 'Pay_In_Person' ? 'Offline' : 
+                                         detail.paymentMode === 'Pay_Online' ? 'Online' : 'N/A';
                     const paymentStr = isFirstEntryForDate ? `$${entry.totalPayment}` : '';
                     doc.text(`${entry.date} |       ${appointmentsStr} |         ${paymentModeStr} |         ${paymentStr}`);
                     isFirstEntryForDate = false;
@@ -704,6 +710,20 @@ exports.generateSalesReport = async (req, res) => {
     }
 };
 
+// Helper function to fill in missing dates
+function formatSalesData(data, startDate, endDate) {
+    const dateMap = new Map(data.map(d => [d.date, d]));
+    const result = [];
+    const current = moment(startDate);
+    const end = moment(endDate);
 
-
-
+    while (current.isSameOrBefore(end, 'day')) {
+        const dateStr = current.format('YYYY-MM-DD');
+        result.push({
+            date: dateStr,
+            appointments: dateMap.get(dateStr)?.appointments || 0
+        });
+        current.add(1, 'day');
+    }
+    return result;
+}
