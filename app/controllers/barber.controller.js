@@ -34,23 +34,68 @@ const BarberSession = db.BarberSession;
 // Function to update the barber's status based on appointments
 async function updateBarberStatus(barberId, availability_status) {
   try {
-    const activeAppointments = await Appointment.findOne({
-      where: {
-        BarberId : barberId,
-        status: [AppointmentENUM.In_salon, AppointmentENUM.Checked_in]  // Check if any ongoing or upcoming appointments
-      }
-    });
-
-    let newStatus = activeAppointments ? 'unavailable' : availability_status?.toLowerCase();
-
-    if (!['available', 'unavailable'].includes(newStatus)) {
-      console.error("Invalid availability status in payload");
-      return; // Agar payload galat hai toh function stop kar do
+    // Validate the incoming availability_status
+    const validStatuses = ['available', 'unavailable'];
+    const requestedStatus = availability_status?.toLowerCase();
+    if (!validStatuses.includes(requestedStatus)) {
+      throw new Error(`Invalid availability status: ${availability_status}. Must be 'available' or 'unavailable'.`);
     }
 
-    await Barber.update({ availability_status: newStatus }, { where: { id: barberId } });
+    // Fetch the barber's current status
+    const barber = await Barber.findOne({ where: { id: barberId } });
+    if (!barber) {
+      throw new Error(`Barber with ID ${barberId} not found`);
+    }
+    const currentStatus = barber.availability_status?.toLowerCase();
+
+    // Check for active appointments
+    const activeAppointments = await Appointment.findOne({
+      where: {
+        BarberId: barberId,
+        status: [AppointmentENUM.In_salon, AppointmentENUM.Checked_in], // Ongoing or upcoming appointments
+      },
+    });
+
+    let newStatus = requestedStatus;
+
+    // Logic for determining newStatus
+    if (activeAppointments) {
+      // If there are active appointments and user requests 'available', warn but allow override
+      if (requestedStatus === 'available') {
+        console.warn(
+          `Barber ${barberId} has active appointments but status is being set to 'available' per request.`
+        );
+        newStatus = 'available'; // Respect the user's explicit request
+      } else {
+        // If user requests 'unavailable' or doesn't specify, enforce 'unavailable'
+        newStatus = 'unavailable';
+        console.log(
+          `Barber ${barberId} has active appointments, setting status to 'unavailable'.`
+        );
+      }
+    } else {
+      // No active appointments, use the requested status
+      newStatus = requestedStatus;
+      console.log(
+        `No active appointments for Barber ${barberId}, setting status to '${newStatus}'.`
+      );
+    }
+
+    // Only update if the status has changed
+    if (currentStatus !== newStatus) {
+      await Barber.update(
+        { availability_status: newStatus },
+        { where: { id: barberId } }
+      );
+      console.log(`Barber ${barberId} status updated from '${currentStatus}' to '${newStatus}'.`);
+    } else {
+      console.log(`Barber ${barberId} status unchanged: '${currentStatus}'.`);
+    }
+
+    return newStatus; // Return the final status for potential use by the caller
   } catch (error) {
-    console.error("Error updating barber status:", error);
+    console.error('Error updating barber status:', error.message);
+    throw error; // Propagate the error to the caller
   }
 }
  
