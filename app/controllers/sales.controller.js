@@ -472,7 +472,7 @@ exports.generateSalesReport = async (req, res) => {
             return res.status(400).json({ success: false, message: 'startDate and endDate are required' });
         }
 
-        const timezone = 'America/Toronto';
+        const timezone = 'Asia/Kolkata';
         const start = moment.tz(startDate, 'YYYY-MM-DD', timezone).startOf('day');
         const end = moment.tz(endDate, 'YYYY-MM-DD', timezone).endOf('day');
 
@@ -676,14 +676,18 @@ exports.generateSalesReport = async (req, res) => {
             ContentType: 'application/pdf',
         };
 
+        const uploadResult = await s3.upload(uploadParams).promise();
+        const downloadUrl = uploadResult.Location;
+
+        fs.unlinkSync(filePath);
+
         res.json({
             success: true,
-            message: 'Sales data retrieved successfully',
-            data: responseData
+            message: 'Sales report with payment data generated and uploaded successfully',
+            data: { downloadUrl },
         });
-
     } catch (error) {
-        console.error('Error sharing sales data:', error);
+        console.error('Error generating sales report:', error);
         res.status(500).json({ success: false, message: 'Server Error' });
     }
 };
@@ -777,3 +781,4 @@ function formatSalesData(data, startDate, endDate) {
     }
     return result;
 }
+
