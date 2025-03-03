@@ -1282,3 +1282,96 @@ exports.GetnewCustomers = async (req, res) => {
         res.status(500).json({ success: false, message: 'Server Error', code: 500 });
     }
 };
+
+
+exports.customerStatus = async (req, res) => {
+    const { filter } = req.query;
+    try {
+        // Step 1: Extract userId from JWT token
+        const userId = req.user ? req.user.id : null;
+
+        if (!userId) {
+              return res.status(401).json({ success: false, message: 'Unauthorized: No user ID found', code: 401 });
+        }
+  
+          // Step 2: Fetch the user and their role (ensure the role is included in the query)
+        const user = await User.findByPk(userId, { include: {
+              model: roles,  // Include the associated Role model
+              as: 'role',    // Alias for the Role model (adjust based on your model's actual alias)
+        } });
+  
+        if (!user || !user.role) {
+              return res.status(403).json({ success: false, message: 'Unauthorized User' });
+        }
+  
+        const userRole = user.role.role_name;
+
+
+        // Validate filter
+        if (!filter || !['today', 'last_7_days', 'last_30_days'].includes(filter)) {
+            return res.status(400).json({ error: 'Invalid filter' });
+        }
+
+        // Get date range
+        const { startDate, endDate } = getDateRange(filter);
+
+        let whereCondition = {}; // Default condition
+
+        // Apply role-based conditions
+        if (userRole === role.SALON_OWNER || userRole === role.SALON_MANAGER) {
+            whereCondition.SalonId = req.user.salonId;
+        } else if (userRole === role.BARBER) {
+            whereCondition.BarberId = req.user.barberId;
+        }
+
+        // Step 3: Fetch customer statistics
+
+        // **Repeated Customers** (Users with multiple appointments)
+        const repeatedCustomers = await Appointment.findAll({
+            attributes: ['UserId', [db.sequelize.fn('COUNT', db.sequelize.col('id')), 'appointmentCount']],
+            where: {
+                ...whereCondition,
+                createdAt: { [Op.between]: [startDate, endDate] },
+            },
+            group: ['UserId'],
+            having: db.sequelize.literal('COUNT(id) > 1'),
+        });
+
+        const customerRole = await db.roles.findOne({ where: { role_name: role.CUSTOMER } });
+
+        // **New Customers** (Customers created within the date range)
+
+        const newCustomers = await User.count({
+            where: {
+                RoleId: customerRole.id,
+                createdAt: { [Op.between]: [startDate, endDate] },
+                ...whereCondition,
+            }
+        });
+
+        // **Total Customers** (All customers)
+        const totalCustomers = await User.count({
+            where: {
+                RoleId: customerRole.id,
+                ...whereCondition,
+            }
+        });
+
+        // Step 4: Format response
+        res.json({
+            success: true,
+            message: `Customer statistics retrieved successfully!`,
+            data: {
+                repeatedCustomers: repeatedCustomers.length,
+                newCustomers,
+                totalCustomers
+            },
+            code: 200
+        });
+
+    } catch (error) {
+        console.error('Error fetching customer status:', error);
+        res.status(500).json({ success: false, message: 'Server Error', code: 500 });
+    }
+};
+
