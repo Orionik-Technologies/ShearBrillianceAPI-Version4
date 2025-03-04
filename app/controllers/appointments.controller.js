@@ -417,9 +417,9 @@ async function handleBarberCategoryLogic(barber, user_id, totalServiceTime, appo
             appointmentData.check_in_time = new Date();
 
             // Update barber session remaining time
-            await barberSession.update({ 
-                remaining_time: remainingTime - totalServiceTime 
-            });
+            // await barberSession.update({ 
+            //     remaining_time: remainingTime - totalServiceTime 
+            // });
         } else {
             // Appointment-based logic
             if (!slot_id) {
@@ -462,7 +462,7 @@ async function handleBarberCategoryLogic(barber, user_id, totalServiceTime, appo
             appointmentData.appointment_end_time = endTime.toTimeString().split(' ')[0];
 
             // Mark slots as booked
-            await markSlotsAsBooked(requiredSlots);
+            //await markSlotsAsBooked(requiredSlots);
         }
 
         return appointmentData; // Return updated appointmentData
