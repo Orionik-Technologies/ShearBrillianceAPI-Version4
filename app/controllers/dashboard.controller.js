@@ -193,22 +193,6 @@ exports.getDashboardData = async (req, res) => {
 
             const paymentTotals = await calculatePaymentTotals({});
 
-            // Repeated Customers (Customers with more than one appointment)
-            const repeatedCustomers = await Appointment.findAll({
-                attributes: ['UserId', [db.sequelize.fn('COUNT', db.sequelize.col('id')), 'appointmentCount']],
-                group: ['UserId'],
-                having: db.sequelize.literal('COUNT(id) > 1'),
-            });
-
-            // New Customers (Customers created this month)
-            const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-            const newCustomers = await User.count({
-                where: {
-                    RoleId: customerRole.id,
-                    createdAt: { [Op.gte]: startOfMonth },
-                }
-            });
-
             data = {
                
                 // totalAdmins: await User.count({ where: { RoleId: adminRole.id } }),
@@ -229,8 +213,6 @@ exports.getDashboardData = async (req, res) => {
                 topSalonsWithDetails,
                 topBarbersWithDetails,
                 topServicesWithDetails,
-                repeatedCustomersCount: repeatedCustomers.length,
-                newCustomersCount: newCustomers,
                 revenue: {
                     online: paymentTotals.online,
                     offline: paymentTotals.offline,
@@ -326,22 +308,6 @@ exports.getDashboardData = async (req, res) => {
                 }
             });
 
-              // Repeated Customers (Customers with more than one appointment)
-              const repeatedCustomers = await Appointment.findAll({
-                attributes: ['UserId', [db.sequelize.fn('COUNT', db.sequelize.col('id')), 'appointmentCount']],
-                group: ['UserId'],
-                having: db.sequelize.literal('COUNT(id) > 1'),
-            });
-
-            // New Customers (Customers created this month)
-            const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-            const newCustomers = await User.count({
-                where: {
-                    RoleId: customerRole.id,
-                    createdAt: { [Op.gte]: startOfMonth },
-                }
-            });
-
         
             data = {
                 totalBarbers,
@@ -353,8 +319,6 @@ exports.getDashboardData = async (req, res) => {
                 completedWalkInCount,
                 canceledAppointmentsCount,
                 pendingFutureAppointmentsCount,
-                repeatedCustomersCount: repeatedCustomers.length,
-                newCustomersCount: newCustomers,
                 revenue: {
                     online: paymentTotals.online,
                     offline: paymentTotals.offline,
