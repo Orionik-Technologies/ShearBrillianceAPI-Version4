@@ -739,7 +739,7 @@ function generateHTMLReport(formattedDataBySalon, salonMap, start, end, timezone
                 th, td {
                     border: 1px solid #ddd;
                     padding: 10px;
-                    text-align: left;
+                    text-align: right;
                     font-size: 12px;
                 }
                 th {
