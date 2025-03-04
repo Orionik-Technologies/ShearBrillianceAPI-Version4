@@ -387,6 +387,102 @@ exports.gettopService = async (req, res) => {
     }
 };
 
+exports.getTopSalons = async (req, res) => {
+    try {
+        // Step 1: Extract the userId from the JWT token (req.user should already have the decoded token)
+        const userId = req.user ? req.user.id : null;
+
+        if (!userId) {
+            return res.status(401).json({ success: false, message: 'Unauthorized: No user ID found', code: 401 });
+        }
+
+        // Step 2: Fetch the user and their role
+        const user = await User.findByPk(userId, {
+            include: {
+                model: roles,  // Include the Role model
+                as: 'role',    // Alias for the Role model
+            }
+        });
+
+        if (!user || !user.role) {
+            return res.status(403).json({ success: false, message: 'Unauthorized User' });
+        }
+
+        const userRole = user.role.role_name;
+
+        let topSalonsWithDetails = [];
+        if (userRole === role.ADMIN) {
+            // Fetch top 3 salons by number of appointments
+            const topSalons = await Appointment.findAll({
+                attributes: [
+                    'SalonId',
+                    [db.sequelize.fn('COUNT', db.sequelize.col('id')), 'appointmentsCount']
+                ],
+                group: ['SalonId'],
+                order: [[db.sequelize.fn('COUNT', db.sequelize.col('id')), 'DESC']],
+                limit: 3,
+            });
+
+            // Fetch salon details for the top 3 salons
+            const salonIds = topSalons.map(salon => salon.SalonId);
+            const salonData = await Salon.findAll({
+                where: { id: salonIds },
+                attributes: ['id', 'name'], // Fetch salon details like id and name
+            });
+
+            // Combine salon data with appointment counts
+            topSalonsWithDetails = topSalons.map(salon => {
+                const salonDetails = salonData.find(s => s.id === salon.SalonId);
+                return {
+                    salonId: salon.SalonId,
+                    appointmentsCount: salon.dataValues.appointmentsCount,
+                    salonName: salonDetails ? salonDetails.name : 'Unknown',
+                };
+            });
+        } else if (userRole === role.SALON_MANAGER) {
+            // For SALON_MANAGER, fetch data only for their specific salon
+            const salonUsage = await db.sequelize.query(
+                `
+                SELECT 
+                  "Appointments"."SalonId" AS salonId,
+                  COUNT("Appointments"."id") AS appointmentsCount,
+                  "Salons"."name" AS salonName
+                FROM 
+                  public."Appointments" AS "Appointments"
+                INNER JOIN 
+                  public."Salons" ON "Appointments"."SalonId" = "Salons"."id"
+                WHERE 
+                  "Appointments"."SalonId" = :salonId
+                GROUP BY 
+                  "Appointments"."SalonId", 
+                  "Salons"."id", 
+                  "Salons"."name"
+                `,
+                {
+                    replacements: { salonId: req.user.salonId }, // Replace :salonId with the user's salonId
+                    type: db.sequelize.QueryTypes.SELECT, // Specify query type
+                }
+            );
+
+            // Map the results to the desired format
+            topSalonsWithDetails = salonUsage.map(salon => ({
+                salonId: salon.salonid,
+                appointmentsCount: salon.appointmentscount,
+                salonName: salon.salonname,
+            }));
+        }
+
+        res.json({
+            success: true,
+            message: 'Top salons data retrieved successfully',
+            data: topSalonsWithDetails,
+        });
+    } catch (error) {
+        console.error('Error fetching top salons data:', error);
+        res.status(500).json({ success: false, message: 'Server Error' });
+    }
+};
+
 exports.getTopBarbers = async (req, res) => {
     try {
         // Step 1: Extract the userId from the JWT token (req.user should already have the decoded token)
