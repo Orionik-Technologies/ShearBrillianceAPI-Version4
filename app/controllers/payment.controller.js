@@ -200,7 +200,8 @@ exports.handleWebhook = async (req, res) => {
             console.log('Cleaned Appointment Data:', cleanedAppointmentData);
 
             try {
-                // Get the selected slot
+                if(cleanedAppointmentData.SlotId){
+                        // Get the selected slot
                 const slot = await db.Slot.findOne({
                     where: {
                         id: cleanedAppointmentData.SlotId,
@@ -224,6 +225,8 @@ exports.handleWebhook = async (req, res) => {
                     throw new Error('Not enough consecutive slots available');
                 }
                 await markSlotsAsBookedExp(requiredSlots);
+                }
+            
                 const appointment = await Appointment.create(cleanedAppointmentData);
 
                 await Payment.create({
