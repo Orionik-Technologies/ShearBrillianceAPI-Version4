@@ -1407,6 +1407,7 @@ exports.GetnewCustomers = async (req, res) => {
 };
 
 
+
 exports.customerStatus = async (req, res) => {
     const { filter } = req.query;
     try {
@@ -1414,25 +1415,26 @@ exports.customerStatus = async (req, res) => {
         const userId = req.user ? req.user.id : null;
 
         if (!userId) {
-              return res.status(401).json({ success: false, message: 'Unauthorized: No user ID found', code: 401 });
+            return res.status(401).json({ success: false, message: 'Unauthorized: No user ID found', code: 401 });
         }
-  
-          // Step 2: Fetch the user and their role (ensure the role is included in the query)
-        const user = await User.findByPk(userId, { include: {
-              model: roles,  // Include the associated Role model
-              as: 'role',    // Alias for the Role model (adjust based on your model's actual alias)
-        } });
-  
-        if (!user || !user.role) {
-              return res.status(403).json({ success: false, message: 'Unauthorized User' });
-        }
-  
-        const userRole = user.role.role_name;
 
+        // Step 2: Fetch the user and their role
+        const user = await User.findByPk(userId, {
+            include: {
+                model: roles,  // Include the associated Role model
+                as: 'role',
+            },
+        });
+
+        if (!user || !user.role) {
+            return res.status(403).json({ success: false, message: 'Unauthorized User', code: 403 });
+        }
+
+        const userRole = user.role.role_name;
 
         // Validate filter
         if (!filter || !['today', 'last_7_days', 'last_30_days'].includes(filter)) {
-            return res.status(400).json({ error: 'Invalid filter' });
+            return res.status(400).json({ success: false, message: 'Invalid filter', code: 400 });
         }
 
         // Get date range
@@ -1441,13 +1443,11 @@ exports.customerStatus = async (req, res) => {
         let whereCondition = {}; // Default condition
 
         // Apply role-based conditions
-        if (userRole === role.SALON_OWNER || userRole === role.SALON_MANAGER) {
+        if (userRole === role.SALON_MANAGER || userRole === role.SALON_OWNER) {
             whereCondition.SalonId = req.user.salonId;
-        } else if (userRole === role.BARBER) {
+        } else if (userRole === 'BARBER') {
             whereCondition.BarberId = req.user.barberId;
         }
-
-        // Step 3: Fetch customer statistics
 
         // **Repeated Customers** (Users with multiple appointments)
         const repeatedCustomers = await Appointment.findAll({
@@ -1460,28 +1460,26 @@ exports.customerStatus = async (req, res) => {
             having: db.sequelize.literal('COUNT(id) > 1'),
         });
 
-        const customerRole = await db.roles.findOne({ where: { role_name: role.CUSTOMER } });
-
-        // **New Customers** (Customers created within the date range)
-
-        const newCustomers = await User.count({
+        // **New Customers** (Users who had their first appointment within the date range)
+        const newCustomers = await Appointment.findAll({
+            attributes: ['UserId'],
             where: {
-                RoleId: customerRole.id,
-                createdAt: { [Op.between]: [startDate, endDate] },
                 ...whereCondition,
-            }
+                createdAt: { [Op.between]: [startDate, endDate] },
+            },
+            group: ['UserId'],
         });
 
-       // **Total Customers** (All customers)
-       const totalCustomers = newCustomers + repeatedCustomers.length;
+        // **Total Customers** (All customers)
+        const totalCustomers = newCustomers.length + repeatedCustomers.length;
 
         // Step 4: Format response
         res.json({
             success: true,
-            message: `Customer statistics retrieved successfully!`,
+            message: 'Customer statistics retrieved successfully!',
             data: {
                 repeatedCustomers: repeatedCustomers.length,
-                newCustomers,
+                newCustomers: newCustomers.length,
                 totalCustomers
             },
             code: 200
