@@ -12,7 +12,7 @@ const { sendMessageToUser } = require('./socket.controller');
 const { sendSMS } = require('../services/smsService');
 const { BarberCategoryENUM } = require('../config/barberCategory.config');
 const { broadcastBoardUpdates } = require('../controllers/socket.controller');
-const { getAppointmentsByRoleExp, handleBarberCategoryLogicExp, prepareEmailDataExp, sendAppointmentNotificationsExp, fetchAppointmentWithServicesExp, validateAndAttachServicesExp, markSlotsAsBookedExp } = require('../controllers/appointments.controller');
+const { getAppointmentsByRoleExp, handleBarberCategoryLogicExp, prepareEmailDataExp, sendAppointmentNotificationsExp, fetchAppointmentWithServicesExp, validateAndAttachServicesExp, markSlotsAsBookedExp, verifyConsecutiveSlotsExp } = require('../controllers/appointments.controller');
 
 
 
@@ -213,7 +213,7 @@ exports.handleWebhook = async (req, res) => {
                 }
 
                 // Verify if enough consecutive slots are available
-                const requiredSlots = await verifyConsecutiveSlots(
+                const requiredSlots = await verifyConsecutiveSlotsExp(
                     slot.BarberSessionId,
                     slot.slot_date,
                     slot.start_time,
