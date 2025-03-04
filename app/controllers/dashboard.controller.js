@@ -1529,3 +1529,89 @@ exports.customerStatus = async (req, res) => {
     }
 };
 
+exports.customerYearlyStatus = async (req, res) => {
+    try {
+        const userId = req.user ? req.user.id : null;
+        if (!userId) {
+            return res.status(401).json({ success: false, message: 'Unauthorized: No user ID found', code: 401 });
+        }
+
+        // Fetch user role
+        const user = await User.findByPk(userId, { include: { model: roles, as: 'role' } });
+        if (!user || !user.role) {
+            return res.status(403).json({ success: false, message: 'Unauthorized User', code: 403 });
+        }
+
+        const userRole = user.role.role_name;
+        const currentYear = new Date().getFullYear();
+
+        // Apply role-based conditions
+        let whereCondition = {};
+        if (userRole === role.SALON_OWNER || userRole === role.SALON_MANAGER) {
+            whereCondition.SalonId = req.user.salonId;
+        } else if (userRole === role.BARBER) {
+            whereCondition.BarberId = req.user.barberId;
+        }
+        
+        // Fetch customer role ID once
+        const customerRole = await roles.findOne({ where: { role_name: role.CUSTOMER } });
+        if (!customerRole) {
+            return res.status(500).json({ success: false, message: 'Customer role not found', code: 500 });
+        }
+
+        
+        // Fetch customer statistics for each month
+        const customerStats = {};
+        const months = [
+            "january", "february", "march", "april", "may", "june",
+            "july", "august", "september", "october", "november", "december"
+        ];
+
+        for (let i = 0; i < months.length; i++) {
+            let monthStart = new Date(currentYear, i, 1);
+            let monthEnd = new Date(currentYear, i + 1, 0, 23, 59, 59);
+
+            // **Repeated Customers** (Users with multiple appointments)
+            const repeatedCustomers = await Appointment.findAll({
+                attributes: ['UserId', [db.sequelize.fn('COUNT', db.sequelize.col('id')), 'appointmentCount']],
+                where: {
+                    ...whereCondition,
+                    createdAt: { [Op.between]: [monthStart, monthEnd] },
+                },
+                group: ['UserId'],
+                having: db.sequelize.literal('COUNT(id) > 1'),
+            });
+
+            // **New Customers** (Customers created within the month)
+            const newCustomers = await User.count({
+                where: {
+                    RoleId: customerRole.id,
+                    createdAt: { [Op.between]: [monthStart, monthEnd] },
+                    ...whereCondition,
+                }
+            });
+
+            // **Total Customers** (All customers)
+            const totalCustomers = newCustomers + repeatedCustomers.length;
+
+            // Store data in the response object
+            customerStats[months[i]] = {
+                repeatedCustomers: repeatedCustomers.length || 0,
+                newCustomers: newCustomers || 0,
+                totalCustomers: totalCustomers || 0
+            };
+        }
+
+        // Step: Send response
+        res.json({
+            success: true,
+            message: "Customer statistics retrieved successfully!",
+            data: customerStats,
+            code: 200
+        });
+
+    } catch (error) {
+        console.error('Error fetching yearly customer status:', error);
+        res.status(500).json({ success: false, message: 'Server Error', code: 500 });
+    }
+};
