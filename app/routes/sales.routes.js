@@ -315,6 +315,96 @@ module.exports = app => {
  */
       app.get(`${apiPrefix}/gettopService`, [authenticateToken],authenticateJWT, authorizeRoles(roles.ADMIN, roles.SALON_OWNER,roles.BARBER, roles.SALON_MANAGER), salesController.gettopService);
 
+           /**
+ * @swagger
+ * /api/sales/gettopBarber:
+ *   get:
+ *     summary: Retrieve top Barber by number of appointments(Only for admin user and manager)
+ *     tags: [Sales]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Successfully retrieved top Barber
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Top Barber data retrieved successfully"
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       serviceId:
+ *                         type: integer
+ *                         example: 101
+ *                       usageCount:
+ *                         type: integer
+ *                         example: 50
+ *                       serviceName:
+ *                         type: string
+ *                         example: "Haircut"
+ *                       serviceDescription:
+ *                         type: string
+ *                         example: "Professional haircut service"
+ *                       servicePrice:
+ *                         type: number
+ *                         format: float
+ *                         example: 15.99
+ *                       serviceisActive:
+ *                         type: boolean
+ *                         example: true
+ *       401:
+ *         description: Unauthorized - Missing or invalid token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Unauthorized: No user ID found"
+ *                 code:
+ *                   type: integer
+ *                   example: 401
+ *       403:
+ *         description: Forbidden - Unauthorized user role
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Unauthorized User"
+ *       500:
+ *         description: Internal Server Error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Server Error"
+ */
+           app.get(`${apiPrefix}/gettopBarber`, [authenticateToken],authenticateJWT, authorizeRoles(roles.ADMIN, roles.SALON_OWNER,roles.BARBER, roles.SALON_MANAGER), salesController.getTopBarbers);
 
     /**
      * @swagger
