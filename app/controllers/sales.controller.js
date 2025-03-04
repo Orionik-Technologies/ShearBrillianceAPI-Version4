@@ -472,7 +472,7 @@ exports.generateSalesReport = async (req, res) => {
             return res.status(400).json({ success: false, message: 'startDate and endDate are required' });
         }
 
-        const timezone = 'Asia/Kolkata';
+        const timezone = 'America/Toronto';
         const start = moment.tz(startDate, 'YYYY-MM-DD', timezone).startOf('day');
         const end = moment.tz(endDate, 'YYYY-MM-DD', timezone).endOf('day');
 
@@ -645,26 +645,38 @@ exports.generateSalesReport = async (req, res) => {
             return acc;
         }, {});
         
-        // Add debugging logs
-        console.log('Formatted Data:', JSON.stringify(formattedDataBySalon, null, 2));
 
         // Generate HTML content
-        const htmlContent = generateHTMLReport(formattedDataBySalon, salonMap, start, end, timezone);
+       // Generate HTML content
+       const htmlContent = generateHTMLReport(formattedDataBySalon, salonMap, start, end, timezone);
 
-        // Generate PDF using Puppeteer
-        const browser = await puppeteer.launch({ headless: 'new' });
-        const page = await browser.newPage();
-        await page.setContent(htmlContent);
-        const fileName = `sales_report_${start.format('YYYYMMDD')}_to_${end.format('YYYYMMDD')}_${Date.now()}.pdf`;
-        const filePath = path.join(__dirname, fileName);
+       // Determine Puppeteer launch options based on environment
+       const isProduction = process.env.NODE_ENV === 'production';
+       const launchOptions = {
+           headless: true,
+           args: ['--no-sandbox', '--disable-setuid-sandbox'], // Required for Render
+       };
 
-        await page.pdf({
-            path: filePath,
-            format: 'A4',
-            printBackground: true,
-            margin: { top: '20mm', bottom: '20mm', left: '15mm', right: '15mm' }
-        });
-        await browser.close();
+       // Only set executablePath in production if specified; otherwise, let Puppeteer use its default
+       if (isProduction && process.env.PUPPETEER_EXECUTABLE_PATH) {
+           launchOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+       }
+
+       // Launch browser
+       const browser = await puppeteer.launch(launchOptions);
+       const page = await browser.newPage();
+       await page.setContent(htmlContent);
+       const fileName = `sales_report_${start.format('YYYYMMDD')}_to_${end.format('YYYYMMDD')}_${Date.now()}.pdf`;
+       const filePath = path.join(__dirname, fileName);
+
+       await page.pdf({
+           path: filePath,
+           format: 'A4',
+           printBackground: true,
+           margin: { top: '20mm', bottom: '20mm', left: '15mm', right: '15mm' }
+       });
+
+
 
         // Upload to S3
         const fileBuffer = fs.readFileSync(filePath);
