@@ -126,9 +126,20 @@ exports.handleWebhook = async (req, res) => {
 
     let event;
     try {
-        event = stripe.webhooks.constructEvent(req.rawBody, sig, endpointSecret);
+        console.log('Stripe-Signature:', sig);
+        console.log('Server Time (UTC):', new Date().toISOString());
+        event = stripe.webhooks.constructEvent(req.rawBody, sig, endpointSecret, {
+            tolerance: 600, // Optional: Increase tolerance to 10 minutes
+        });
     } catch (err) {
         console.error('Webhook signature verification failed:', err.message);
+        if (err.code === 'webhook_timestamp_outside_tolerance') {
+            console.warn('Timestamp outside tolerance zone, logging for review:', {
+                signature: sig,
+                rawBody: req.rawBody,
+            });
+            return res.status(400).send('Webhook Error: Timestamp outside tolerance zone');
+        }
         return res.status(400).send(`Webhook Error: ${err.message}`);
     }
 
