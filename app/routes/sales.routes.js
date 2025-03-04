@@ -342,25 +342,18 @@ module.exports = app => {
  *                   items:
  *                     type: object
  *                     properties:
- *                       serviceId:
+ *                       barberId:
  *                         type: integer
  *                         example: 101
- *                       usageCount:
+ *                       appointmentsCount:
  *                         type: integer
  *                         example: 50
- *                       serviceName:
+ *                       barberName:
  *                         type: string
- *                         example: "Haircut"
- *                       serviceDescription:
+ *                         example: "Virat Kohli"
+ *                       salonName:
  *                         type: string
- *                         example: "Professional haircut service"
- *                       servicePrice:
- *                         type: number
- *                         format: float
- *                         example: 15.99
- *                       serviceisActive:
- *                         type: boolean
- *                         example: true
+ *                         example: "India"
  *       401:
  *         description: Unauthorized - Missing or invalid token
  *         content:
@@ -405,6 +398,88 @@ module.exports = app => {
  *                   example: "Server Error"
  */
            app.get(`${apiPrefix}/gettopBarber`, [authenticateToken],authenticateJWT, authorizeRoles(roles.ADMIN, roles.SALON_OWNER,roles.BARBER, roles.SALON_MANAGER), salesController.getTopBarbers);
+
+
+                /**
+ * @swagger
+ * /api/sales/gettopSalon:
+ *   get:
+ *     summary: Retrieve top Salon by number of appointments(Only for admin user and manager)
+ *     tags: [Sales]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Successfully retrieved top Salon
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Top Salon data retrieved successfully"
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       salonId:
+ *                         type: integer
+ *                         example: 101
+ *                       appointmentsCount:
+ *                         type: integer
+ *                         example: 101
+ *                       salonName:
+ *                         type: string
+ *                         example: "Salon"
+ *       401:
+ *         description: Unauthorized - Missing or invalid token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Unauthorized: No user ID found"
+ *                 code:
+ *                   type: integer
+ *                   example: 401
+ *       403:
+ *         description: Forbidden - Unauthorized user role
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Unauthorized User"
+ *       500:
+ *         description: Internal Server Error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Server Error"
+ */
+      app.get(`${apiPrefix}/gettopSalon`, [authenticateToken],authenticateJWT, authorizeRoles(roles.ADMIN, roles.SALON_OWNER,roles.BARBER, roles.SALON_MANAGER), salesController.getTopSalons);
 
     /**
      * @swagger
