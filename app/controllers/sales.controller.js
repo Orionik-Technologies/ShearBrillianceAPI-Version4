@@ -724,9 +724,9 @@ function generateHTMLReport(formattedDataBySalon, salonMap, start, end, timezone
                     margin-bottom: 20px;
                 }
                 h2 {
-                    color: #2980b9;
+                    color: #be9342;
                     font-size: 20px;
-                    border-bottom: 2px solid #3498db;
+                    border-bottom: 2px solid #be9342;
                     padding-bottom: 5px;
                     margin-top: 30px;
                 }
@@ -743,7 +743,7 @@ function generateHTMLReport(formattedDataBySalon, salonMap, start, end, timezone
                     font-size: 12px;
                 }
                 th {
-                    background-color: #3498db;
+                    background-color: #be9342;
                     color: white;
                     font-weight: bold;
                 }
