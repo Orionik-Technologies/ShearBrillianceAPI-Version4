@@ -18,6 +18,7 @@ const path = require('path');
 const sendResponse = require('../helpers/responseHelper');  // Import the helper
 const { put } = require('@vercel/blob'); // Import 'put' directly if using Vercel's blob SDK upload method
 const AWS = require('aws-sdk');
+const pdf = require('html-pdf'); // Add this at the top with other imports
 
 const s3 = new AWS.S3({
     endpoint: new AWS.Endpoint('https://tor1.digitaloceanspaces.com'), // Replace with your DigitalOcean Spaces endpoint
@@ -842,6 +843,163 @@ const ensureDirectoryExists = (filePath) => {
     }
 };
 
+// New function to generate PDF using html-pdf
+const generatePDFWithHTML = async (htmlContent, filePath) => {
+    const pdfOptions = {
+        format: 'A4',
+        orientation: 'portrait',
+        border: {
+            top: '20mm',
+            bottom: '20mm',
+            left: '15mm',
+            right: '15mm'
+        },
+        type: 'pdf'
+    };
+
+    return new Promise((resolve, reject) => {
+        ensureDirectoryExists(filePath);
+        pdf.create(htmlContent, pdfOptions).toFile(filePath, (err, result) => {
+            if (err) return reject(err);
+            resolve(result.filename);
+        });
+    });
+};
+
+// New function to generate styled HTML content
+const generateHTMLReport = (userRole, data, barbersData, startDate, endDate) => {
+    const titlePrefix = userRole === role.ADMIN ? 'Admin' : 'Salon Owner';
+    let html = `
+        <html>
+        <head>
+            <style>
+                body {
+                    font-family: 'Helvetica', sans-serif;
+                    margin: 0;
+                    padding: 0;
+                    color: #333;
+                }
+                .container {
+                    width: 100%;
+                    max-width: 800px;
+                    margin: 0 auto;
+                }
+                h1 {
+                    text-align: center;
+                    color: #2c3e50;
+                    font-size: 28px;
+                    margin-bottom: 10px;
+                }
+                .subtitle {
+                    text-align: center;
+                    font-size: 14px;
+                    color: #7f8c8d;
+                    margin-bottom: 20px;
+                }
+                h2 {
+                    color: #be9342;
+                    font-size: 20px;
+                    border-bottom: 2px solid #be9342;
+                    padding-bottom: 5px;
+                    margin-top: 30px;
+                }
+                table {
+                    width: 100%;
+                    border-collapse: collapse;
+                    margin-bottom: 20px;
+                    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+                }
+                th, td {
+                    border: 1px solid #ddd;
+                    padding: 10px;
+                    text-align: left;
+                    font-size: 12px;
+                }
+                th {
+                    background-color: #be9342;
+                    color: white;
+                    font-weight: bold;
+                }
+               td:nth-child(2) {
+                    text-align: right; /* Right-align the second column (Count) */
+                }
+                tr:nth-child(even) {
+                    background-color: #f9f9f9;
+                }
+                tr:hover {
+                    background-color: #f1f1f1;
+                }
+                .summary, .barber-details {
+                    font-size: 14px;
+                    color: #2c3e50;
+                    margin-top: 15px;
+                    padding: 10px;
+                    background-color: #ecf0f1;
+                    border-radius: 5px;
+                }
+                .footer {
+                    text-align: center;
+                    font-size: 10px;
+                    color: #95a5a6;
+                    margin-top: 30px;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h1>Shear Brilliance ${titlePrefix} Dashboard</h1>
+                <p class="subtitle">Report Date: ${moment().format('YYYY-MM-DD')}</p>
+                <p class="subtitle">Date Range: ${startDate} to ${endDate}</p>
+
+                <div class="summary">
+                    <p>Total Salons: ${data.totalSalons}</p>
+                    <p>Total Customers: ${data.totalCustomers}</p>
+                    <p>Total Barbers: ${data.totalBarbers}</p>
+                </div>
+
+                <h2>Appointment Summary</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Status</th>
+                            <th>Count</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>Total Appointments</td><td>${data.totalAppointments}</td></tr>
+                        <tr><td>Pending Appointments</td><td>${data.pendingAppointmentsCount}</td></tr>
+                        <tr><td>Completed Appointments</td><td>${data.completedAppointmentsCount}</td></tr>
+                        <tr><td>Canceled Appointments</td><td>${data.canceledAppointmentsCount}</td></tr>
+                        <tr><td>Active Appointments</td><td>${data.activeAppointmentsCount}</td></tr>
+                    </tbody>
+                </table>
+
+                <h2>Barber Details</h2>
+                <div class="barber-details">
+    `;
+
+    barbersData.forEach(barber => {
+        html += `
+            <p><strong>Barber: ${barber.barberName}</strong></p>
+            <p>Active Appointments: ${barber.activeAppointmentsCount}</p>
+            <p>Pending Appointments: ${barber.pendingAppointmentsCount}</p>
+            <p>Completed Appointments: ${barber.completedAppointmentsCount}</p>
+            <p>Canceled Appointments: ${barber.canceledAppointmentsCount}</p>
+            <br>
+        `;
+    });
+
+    html += `
+                </div>
+                <div class="footer">
+                    <p>Generated by Shear Brilliance - All Rights Reserved</p>
+                </div>
+            </div>
+        </body>
+        </html>
+    `;
+    return html;
+};
 
 exports.generateAdminAppointmentReport = async (req, res) => {
     try {
@@ -974,7 +1132,7 @@ exports.generateAdminAppointmentReport = async (req, res) => {
                 };
             }));
 
-            // Generate PDF
+            // Generate PDF (replacing the original PDF generation logic)
             const fileName = `${userRole.toLowerCase()}_appointment_dashboard_${moment().format('YYYY-MM-DD')}.pdf`;
             const filePath = path.resolve(__dirname, '../public/reports', fileName);
             
@@ -1051,7 +1209,9 @@ exports.generateAdminAppointmentReport = async (req, res) => {
             });
 
             try {
-                await generatePDF(doc, filePath);
+                // Replace generatePDF with generatePDFWithHTML
+                const htmlContent = generateHTMLReport(userRole, data, barbersData, startDate, endDate);
+                await generatePDFWithHTML(htmlContent, filePath); // Use the new HTML-based function
                 const fileBuffer = fs.readFileSync(filePath);
 
                 const uploadParams = {
@@ -1091,7 +1251,6 @@ exports.generateAdminAppointmentReport = async (req, res) => {
         res.status(500).json({ success: false, message: 'Server Error', code: 500 });
     }
 };
-
 // Helper function to calculate date ranges
 const getDateRange = (filter) => {
     const today = new Date();
