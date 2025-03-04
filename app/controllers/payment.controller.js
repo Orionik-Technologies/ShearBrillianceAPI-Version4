@@ -1,7 +1,7 @@
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const { end } = require('pdfkit');
 const sendResponse = require('../helpers/responseHelper'); // Import the helper function
-const { isOnlinePaymentEnabled }= require('../helpers/configurationHelper'); // Import the helper function
+const { isOnlinePaymentEnabled } = require('../helpers/configurationHelper'); // Import the helper function
 const db = require("../models");
 const { Payment, Appointment, Service } = require('../models'); // Adjust path as needed
 const { PaymentMethodENUM } = require('../config/paymentEnums.config');
@@ -12,7 +12,7 @@ const { sendMessageToUser } = require('./socket.controller');
 const { sendSMS } = require('../services/smsService');
 const { BarberCategoryENUM } = require('../config/barberCategory.config');
 const { broadcastBoardUpdates } = require('../controllers/socket.controller');
-const {  getAppointmentsByRoleExp, handleBarberCategoryLogicExp, prepareEmailDataExp, sendAppointmentNotificationsExp, fetchAppointmentWithServicesExp, validateAndAttachServicesExp } = require('../controllers/appointments.controller');
+const { getAppointmentsByRoleExp, handleBarberCategoryLogicExp, prepareEmailDataExp, sendAppointmentNotificationsExp, fetchAppointmentWithServicesExp, validateAndAttachServicesExp, markSlotsAsBookedExp } = require('../controllers/appointments.controller');
 
 
 
@@ -97,6 +97,7 @@ exports.createPayment = async (req, res) => {
                 user_id: user_id.toString(),
                 appointmentData: serializedAppointmentData,
                 tip: validatedTip.toString(),
+                totalServiceTime: totalServiceTime
             },
             automatic_payment_methods: {
                 enabled: true,
@@ -104,7 +105,7 @@ exports.createPayment = async (req, res) => {
         });
 
         // Return the client secret and payment intent ID
-         return sendResponse(res, true, 'Payment initiated successfully', {
+        return sendResponse(res, true, 'Payment initiated successfully', {
             paymentIntent
         }, 200);
 
@@ -181,6 +182,8 @@ exports.handleWebhook = async (req, res) => {
 
             const userId = paymentIntent.metadata.user_id;
             const appointmentData = JSON.parse(paymentIntent.metadata.appointmentData);
+            const metadataInfo = JSON.parse(paymentIntent.metadata);
+
             const tip = parseFloat(paymentIntent.metadata.tip || 0);
             const totalAmount = paymentIntent.amount / 100;
 
@@ -197,6 +200,30 @@ exports.handleWebhook = async (req, res) => {
             console.log('Cleaned Appointment Data:', cleanedAppointmentData);
 
             try {
+                // Get the selected slot
+                const slot = await db.Slot.findOne({
+                    where: {
+                        id: cleanedAppointmentData.SlotId,
+                        is_booked: false
+                    }
+                });
+
+                if (!slot) {
+                    throw new Error('Selected slot is not available');
+                }
+
+                // Verify if enough consecutive slots are available
+                const requiredSlots = await verifyConsecutiveSlots(
+                    slot.BarberSessionId,
+                    slot.slot_date,
+                    slot.start_time,
+                    metadataInfo.totalServiceTime
+                );
+
+                if (!requiredSlots) {
+                    throw new Error('Not enough consecutive slots available');
+                }
+                await markSlotsAsBookedExp(requiredSlots);
                 const appointment = await Appointment.create(cleanedAppointmentData);
 
                 await Payment.create({
@@ -282,16 +309,16 @@ exports.handleWebhook = async (req, res) => {
             // Check if any amount was charged (e.g., authorization hold) that needs refunding
             if (paymentIntent.amount_received > 0) {
                 try {
-                const refund = await stripe.refunds.create({
-                    payment_intent: paymentIntent.id,
-                    reason: 'payment_failed',
-                });
-                console.log('Refund initiated for failed payment:', refund);
-                await handleRefundUpdates(refund, paymentIntent.id);
-                return res.json({ received: true, message: 'Payment failed, refund initiated' });
+                    const refund = await stripe.refunds.create({
+                        payment_intent: paymentIntent.id,
+                        reason: 'payment_failed',
+                    });
+                    console.log('Refund initiated for failed payment:', refund);
+                    await handleRefundUpdates(refund, paymentIntent.id);
+                    return res.json({ received: true, message: 'Payment failed, refund initiated' });
                 } catch (refundError) {
-                console.error('Error initiating refund for failed payment:', refundError);
-                return res.json({ received: true, error: 'Payment failed, refund could not be initiated' });
+                    console.error('Error initiating refund for failed payment:', refundError);
+                    return res.json({ received: true, error: 'Payment failed, refund could not be initiated' });
                 }
             } else {
                 // No amount was charged, just log failure
@@ -323,19 +350,19 @@ exports.handleWebhook = async (req, res) => {
 
 exports.checkPaymentStatus = async (req, res) => {
     const { paymentIntentId } = req.params;
-  
-    try {
-      const payment = await Payment.findOne({ where: { paymentIntentId } });
-      
-      if (!payment) {
-        // Payment not yet created by webhook, still processing
-        return sendResponse(res, true, 'Payment still processing', { status: 'Pending' }, 200);
-      }
 
-      // Check payment status
-      return sendResponse(res, true, 'Payment status retrieved', { status: payment.paymentStatus }, 200);
+    try {
+        const payment = await Payment.findOne({ where: { paymentIntentId } });
+
+        if (!payment) {
+            // Payment not yet created by webhook, still processing
+            return sendResponse(res, true, 'Payment still processing', { status: 'Pending' }, 200);
+        }
+
+        // Check payment status
+        return sendResponse(res, true, 'Payment status retrieved', { status: payment.paymentStatus }, 200);
     } catch (error) {
-      console.error('Error checking payment status:', error);
-      return sendResponse(res, false, 'Failed to check payment status', null, 500);
+        console.error('Error checking payment status:', error);
+        return sendResponse(res, false, 'Failed to check payment status', null, 500);
     }
 };
