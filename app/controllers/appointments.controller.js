@@ -2899,19 +2899,57 @@ exports.findOneDetails = async (req, res) => {
             return sendResponse(res, false, "Appointment not found", null, 404);
         }
 
+        // Add payment details logic
+        let category = '';
+        if (appointment.Barber && appointment.Barber.category === BarberCategoryENUM.ForAppointment) {
+            category = 'Appointment';
+        } else if (appointment.Barber && appointment.Barber.category === BarberCategoryENUM.ForWalkIn) {
+            category = 'Checked in';
+        }
+
+        const payment = await Payment.findOne({
+            where: { appointmentId: appointment.id },
+            attributes: { exclude: ['createdAt', 'updatedAt', 'deletedAt'] },
+        });
+
+        let receiptUrl = null;
+        if (payment) {
+            try {
+                const paymentIntent = await stripe.paymentIntents.retrieve(payment.paymentIntentId);
+                receiptUrl = paymentIntent.charges?.data[0]?.receipt_url;
+
+                if (!receiptUrl && paymentIntent.latest_charge) {
+                    const charge = await stripe.charges.retrieve(paymentIntent.latest_charge);
+                    receiptUrl = charge.receipt_url;
+                }
+            } catch (error) {
+                console.error(`Error retrieving receipt URL for payment ${payment.id}:`, error);
+            }
+        }
+
+        const paymentDetails = payment ? {
+            id: payment.id,
+            amount: payment.amount,
+            tip: payment.tip,
+            tax: payment.tax,
+            discount: payment.discount,
+            totalAmount: payment.totalAmount,
+            currency: payment.currency,
+            paymentStatus: payment.paymentStatus,
+            receiptUrl: receiptUrl,
+        } : null;
+
         // Get appointment services with potential duplicates
         const appointmentServices = await AppointmentService.findAll({
             where: {
                 AppointmentId: appointment.id,
             },
-            order: [['id', 'ASC']], // Maintain consistent order
+            order: [['id', 'ASC']],
         });
 
-        // Get unique service IDs for fetching service details
         const serviceIds = appointmentServices.map(as => as.ServiceId);
         const uniqueServiceIds = [...new Set(serviceIds)];
 
-        // Get all services details
         const servicesDetails = await Service.findAll({
             where: {
                 id: uniqueServiceIds,
@@ -2919,13 +2957,11 @@ exports.findOneDetails = async (req, res) => {
             attributes: ['id', 'name', 'description', 'min_price', 'max_price', 'default_service_time'],
         });
 
-        // Create a map for quick service lookup
         const servicesMap = servicesDetails.reduce((map, service) => {
             map[service.id] = service.toJSON();
             return map;
         }, {});
 
-        // Get barber services with prices
         const barberServices = await BarberService.findAll({
             where: {
                 BarberId: appointment.BarberId,
@@ -2942,13 +2978,11 @@ exports.findOneDetails = async (req, res) => {
             nest: true,
         });
 
-        // Create map of barber services with prices
         const barberServicePrices = barberServices.reduce((map, bs) => {
             map[bs.service.id] = bs.price;
             return map;
         }, {});
 
-        // Create Services array maintaining original order and duplicates
         const services = appointmentServices.map(as => ({
             id: servicesMap[as.ServiceId].id,
             name: servicesMap[as.ServiceId].name,
@@ -2957,7 +2991,6 @@ exports.findOneDetails = async (req, res) => {
             default_service_time: servicesMap[as.ServiceId].default_service_time
         }));
 
-        // Create barbersWithServices array maintaining same order and duplicates as Services
         const barbersWithServices = appointmentServices.map(as => ({
             id: servicesMap[as.ServiceId].id,
             name: servicesMap[as.ServiceId].name,
@@ -2982,6 +3015,8 @@ exports.findOneDetails = async (req, res) => {
 
         // Convert appointment to plain object and add our custom fields
         const appointmentData = appointment.toJSON();
+        appointmentData.category = category;
+        appointmentData.payment = paymentDetails;
         appointmentData.Services = services;
         appointmentData.barbersWithServices = barbersWithServices;
         appointmentData.is_like = isLike;
