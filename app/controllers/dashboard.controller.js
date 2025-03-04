@@ -1407,9 +1407,31 @@ exports.GetnewCustomers = async (req, res) => {
 };
 
 
+
 exports.customerStatus = async (req, res) => {
     const { filter } = req.query;
     try {
+        // Step 1: Extract userId from JWT token
+        const userId = req.user ? req.user.id : null;
+
+        if (!userId) {
+            return res.status(401).json({ success: false, message: 'Unauthorized: No user ID found', code: 401 });
+        }
+
+        // Step 2: Fetch the user and their role
+        const user = await User.findByPk(userId, {
+            include: {
+                model: roles,  // Include the associated Role model
+                as: 'role',
+            },
+        });
+
+        if (!user || !user.role) {
+            return res.status(403).json({ success: false, message: 'Unauthorized User', code: 403 });
+        }
+
+        const userRole = user.role.role_name;
+
         // Validate filter
         if (!filter || !['today', 'last_7_days', 'last_30_days'].includes(filter)) {
             return res.status(400).json({ success: false, message: 'Invalid filter', code: 400 });
@@ -1418,10 +1440,20 @@ exports.customerStatus = async (req, res) => {
         // Get date range
         const { startDate, endDate } = getDateRange(filter);
 
+        let whereCondition = {}; // Default condition
+
+        // Apply role-based conditions
+        if (userRole === role.SALON_MANAGER || userRole === role.SALON_OWNER) {
+            whereCondition.SalonId = req.user.salonId;
+        } else if (userRole === 'BARBER') {
+            whereCondition.BarberId = req.user.barberId;
+        }
+
         // **Repeated Customers** (Users with multiple appointments)
         const repeatedCustomers = await Appointment.findAll({
             attributes: ['UserId', [db.sequelize.fn('COUNT', db.sequelize.col('id')), 'appointmentCount']],
             where: {
+                ...whereCondition,
                 createdAt: { [Op.between]: [startDate, endDate] },
             },
             group: ['UserId'],
@@ -1432,6 +1464,7 @@ exports.customerStatus = async (req, res) => {
         const newCustomers = await Appointment.findAll({
             attributes: ['UserId'],
             where: {
+                ...whereCondition,
                 createdAt: { [Op.between]: [startDate, endDate] },
             },
             group: ['UserId'],
@@ -1457,5 +1490,4 @@ exports.customerStatus = async (req, res) => {
         res.status(500).json({ success: false, message: 'Server Error', code: 500 });
     }
 };
-
 
