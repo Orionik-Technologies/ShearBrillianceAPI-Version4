@@ -182,7 +182,7 @@ exports.handleWebhook = async (req, res) => {
 
             const userId = paymentIntent.metadata.user_id;
             const appointmentData = JSON.parse(paymentIntent.metadata.appointmentData);
-            const metadataInfo = JSON.parse(paymentIntent.metadata);
+            const metadataInfo = paymentIntent.metadata;
 
             const tip = parseFloat(paymentIntent.metadata.tip || 0);
             const totalAmount = paymentIntent.amount / 100;
