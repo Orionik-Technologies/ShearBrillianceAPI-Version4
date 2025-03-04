@@ -18,8 +18,8 @@ const sendResponse = require('../helpers/responseHelper');  // Import the helper
 const { put } = require('@vercel/blob'); // Import 'put' directly if using Vercel's blob SDK upload method
 const AWS = require('aws-sdk');
 const userTimezone = 'America/Toronto';
-const puppeteer = require('puppeteer');
-
+// const puppeteer = require('puppeteer');
+const pdf = require('html-pdf');
 const s3 = new AWS.S3({
     endpoint: new AWS.Endpoint('https://tor1.digitaloceanspaces.com'), // Replace with your DigitalOcean Spaces endpoint
     accessKeyId: process.env.AWS_ACCESS_KEY_ID,
@@ -485,6 +485,7 @@ exports.generateSalesReport = async (req, res) => {
         let salesData = [];
         let paymentData = [];
 
+        // Fetch data based on user role (unchanged logic)
         if (userRole === role.ADMIN) {
             salesData = await Appointment.findAll({
                 attributes: [
@@ -568,10 +569,8 @@ exports.generateSalesReport = async (req, res) => {
                 raw: true,
             });
         }
-        
-        // ... (salon name fetching remains unchanged)
-        
-        // Group sales data by salon and date
+
+        // Process sales and payment data (unchanged logic)
         const groupedSalesData = {};
         salesData.forEach(entry => {
             const normalizedDate = moment.tz(entry.date, timezone).format('YYYY-MM-DD');
@@ -582,13 +581,12 @@ exports.generateSalesReport = async (req, res) => {
                 groupedSalesData[entry.SalonId][normalizedDate] = [];
             }
             groupedSalesData[entry.SalonId][normalizedDate].push({
-                appointments: parseInt(entry.appointments), // Ensure integer
+                appointments: parseInt(entry.appointments),
                 paymentMode: entry.paymentMode,
-                revenue: parseFloat(entry.revenue || 0).toFixed(2) // Ensure float
+                revenue: parseFloat(entry.revenue || 0).toFixed(2)
             });
         });
-        
-        // Format sales data per salon and calculate totals
+
         const formattedDataBySalon = {};
         Object.keys(groupedSalesData).forEach(salonId => {
             const dates = Object.keys(groupedSalesData[salonId]).sort();
@@ -600,7 +598,7 @@ exports.generateSalesReport = async (req, res) => {
                 reportStartDate,
                 reportEndDate
             );
-        
+
             formattedDataBySalon[salonId] = {
                 dailyData: formattedDates.map(dateEntry => ({
                     ...dateEntry,
@@ -612,15 +610,13 @@ exports.generateSalesReport = async (req, res) => {
                 }
             };
         });
-        
-        // Process payment data
+
         const paymentMap = {};
         paymentData.forEach(payment => {
             const normalizedDate = moment.tz(payment.date, timezone).format('YYYY-MM-DD');
             paymentMap[normalizedDate] = parseFloat(payment.totalPayment || 0).toFixed(2);
         });
-        
-        // Combine with payment data and calculate totals
+
         Object.keys(formattedDataBySalon).forEach(salonId => {
             formattedDataBySalon[salonId].dailyData = formattedDataBySalon[salonId].dailyData.map(entry => {
                 const totalPayment = paymentMap[entry.date] || '0.00';
@@ -644,39 +640,33 @@ exports.generateSalesReport = async (req, res) => {
             acc[salon.id] = salon.name;
             return acc;
         }, {});
-        
 
-        // Generate HTML content
-       // Generate HTML content
-       const htmlContent = generateHTMLReport(formattedDataBySalon, salonMap, start, end, timezone);
+        // Generate HTML content with enhanced styling
+        const htmlContent = generateHTMLReport(formattedDataBySalon, salonMap, start, end, timezone);
 
-       // Determine Puppeteer launch options based on environment
-       const isProduction = process.env.NODE_ENV === 'production';
-       const launchOptions = {
-           headless: true,
-           args: ['--no-sandbox', '--disable-setuid-sandbox'], // Required for Render
-       };
+        // PDF options for a nice layout
+        const pdfOptions = {
+            format: 'A4',
+            orientation: 'portrait',
+            border: {
+                top: '20mm',
+                bottom: '20mm',
+                left: '15mm',
+                right: '15mm'
+            },
+            type: 'pdf'
+        };
 
-       // Only set executablePath in production if specified; otherwise, let Puppeteer use its default
-       if (isProduction && process.env.PUPPETEER_EXECUTABLE_PATH) {
-           launchOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
-       }
+        const fileName = `sales_report_${start.format('YYYYMMDD')}_to_${end.format('YYYYMMDD')}_${Date.now()}.pdf`;
+        const filePath = path.join(__dirname, fileName);
 
-       // Launch browser
-       const browser = await puppeteer.launch(launchOptions);
-       const page = await browser.newPage();
-       await page.setContent(htmlContent);
-       const fileName = `sales_report_${start.format('YYYYMMDD')}_to_${end.format('YYYYMMDD')}_${Date.now()}.pdf`;
-       const filePath = path.join(__dirname, fileName);
-
-       await page.pdf({
-           path: filePath,
-           format: 'A4',
-           printBackground: true,
-           margin: { top: '20mm', bottom: '20mm', left: '15mm', right: '15mm' }
-       });
-
-
+        // Generate PDF from HTML
+        await new Promise((resolve, reject) => {
+            pdf.create(htmlContent, pdfOptions).toFile(filePath, (err, result) => {
+                if (err) return reject(err);
+                resolve(result);
+            });
+        });
 
         // Upload to S3
         const fileBuffer = fs.readFileSync(filePath);
@@ -704,29 +694,87 @@ exports.generateSalesReport = async (req, res) => {
     }
 };
 
-// Helper function to generate HTML content
+// Enhanced HTML Report Generator for a User-Friendly and Nice Look
 function generateHTMLReport(formattedDataBySalon, salonMap, start, end, timezone) {
     let html = `
         <html>
         <head>
             <style>
-                body { font-family: Arial, sans-serif; margin: 0; padding: 20px; }
-                h1 { text-align: center; color: #333; }
-                h2 { color: #555; }
-                table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-                th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-                th { background-color: #f2f2f2; }
-                .totals { font-weight: bold; margin-top: 10px; }
-                .header { margin-bottom: 20px; }
-                .date { font-size: 0.9em; color: #666; }
+                body {
+                    font-family: 'Helvetica', sans-serif;
+                    margin: 0;
+                    padding: 0;
+                    color: #333;
+                }
+                .container {
+                    width: 100%;
+                    max-width: 800px;
+                    margin: 0 auto;
+                }
+                h1 {
+                    text-align: center;
+                    color: #2c3e50;
+                    font-size: 28px;
+                    margin-bottom: 10px;
+                }
+                .subtitle {
+                    text-align: center;
+                    font-size: 14px;
+                    color: #7f8c8d;
+                    margin-bottom: 20px;
+                }
+                h2 {
+                    color: #2980b9;
+                    font-size: 20px;
+                    border-bottom: 2px solid #3498db;
+                    padding-bottom: 5px;
+                    margin-top: 30px;
+                }
+                table {
+                    width: 100%;
+                    border-collapse: collapse;
+                    margin-bottom: 20px;
+                    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+                }
+                th, td {
+                    border: 1px solid #ddd;
+                    padding: 10px;
+                    text-align: left;
+                    font-size: 12px;
+                }
+                th {
+                    background-color: #3498db;
+                    color: white;
+                    font-weight: bold;
+                }
+                tr:nth-child(even) {
+                    background-color: #f9f9f9;
+                }
+                tr:hover {
+                    background-color: #f1f1f1;
+                }
+                .totals {
+                    font-weight: bold;
+                    font-size: 14px;
+                    color: #2c3e50;
+                    margin-top: 15px;
+                    padding: 10px;
+                    background-color: #ecf0f1;
+                    border-radius: 5px;
+                }
+                .footer {
+                    text-align: center;
+                    font-size: 10px;
+                    color: #95a5a6;
+                    margin-top: 30px;
+                }
             </style>
         </head>
         <body>
-            <div class="header">
+            <div class="container">
                 <h1>Shear Brilliance Sales Report</h1>
-                <p class="date">${start.format('YYYY-MM-DD')} to ${end.format('YYYY-MM-DD')}</p>
-                <p class="date">Generated on: ${moment().tz(timezone).format('MMMM Do YYYY, h:mm:ss a')}</p>
-            </div>
+                <p class="subtitle">${start.format('MMMM Do YYYY')} to ${end.format('MMMM Do YYYY')}</p>
+                <p class="subtitle">Generated on: ${moment().tz(timezone).format('MMMM Do YYYY, h:mm:ss a')}</p>
     `;
 
     for (const [salonId, salonData] of Object.entries(formattedDataBySalon)) {
@@ -770,6 +818,10 @@ function generateHTMLReport(formattedDataBySalon, salonMap, start, end, timezone
     }
 
     html += `
+                <div class="footer">
+                    <p>Generated by Shear Brilliance - All Rights Reserved</p>
+                </div>
+            </div>
         </body>
         </html>
     `;
