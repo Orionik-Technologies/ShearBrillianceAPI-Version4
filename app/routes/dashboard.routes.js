@@ -150,29 +150,41 @@ module.exports = app => {
   */
   app.get(`${apiPrefix}/appointment-dashboard`, [authenticateToken], authenticateJWT, authorizeRoles(roles.ADMIN, roles.SALON_OWNER, roles.BARBER, roles.SALON_MANAGER), dashboardController.getAppointmentDashboardData);
 
-  /**
+ /**
 * @swagger
 * /api/dashboard/generate-report:
 *   get:
 *     summary: Generate a PDF report for appointments
-*     description: Generates a PDF report containing appointment data, including users, barbers, salons, and appointment statuses, with optional filtering by start and end dates. Accessible only to admins.
+*     description: Generates a PDF report containing appointment data, including users, barbers, salons, and appointment statuses, with optional filtering by start and end dates, salon, and barber. Accessible only to admins and salon owners.
 *     tags:
 *       - Dashboard
 *     parameters:
 *       - in: query
 *         name: startDate
-*         required: false
+*         required: true
 *         schema:
 *           type: string
 *           format: date
-*         description: The start date for filtering appointments in the format YYYY-MM-DD (optional).
+*         description: The start date for filtering appointments in YYYY-MM-DD format.
 *       - in: query
 *         name: endDate
-*         required: false
+*         required: true
 *         schema:
 *           type: string
 *           format: date
-*         description: The end date for filtering appointments in the format YYYY-MM-DD (optional).
+*         description: The end date for filtering appointments in YYYY-MM-DD format.
+*       - in: query
+*         name: salonId
+*         required: false
+*         schema:
+*           type: integer
+*         description: The salon ID to filter appointments (optional).
+*       - in: query
+*         name: barberId
+*         required: false
+*         schema:
+*           type: integer
+*         description: The barber ID to filter appointments (optional).
 *     responses:
 *       200:
 *         description: PDF report generated successfully.
@@ -190,12 +202,15 @@ module.exports = app => {
 *                 downloadLink:
 *                   type: string
 *                   description: URL to download the generated PDF report.
+*                 data:
+*                   type: object
+*                   description: Summary statistics of the report.
 *               example:
 *                 success: true
 *                 message: PDF Report generated successfully
 *                 downloadLink: /reports/Appointment_Report_20241203120000.pdf
 *       400:
-*         description: Bad request - Invalid date format.
+*         description: Bad request - Invalid or missing required parameters.
 *         content:
 *           application/json:
 *             schema:
@@ -212,7 +227,7 @@ module.exports = app => {
 *                   description: Error code.
 *               example:
 *                 success: false
-*                 message: Invalid start date
+*                 message: "Start date and end date are required"
 *                 code: 400
 *       401:
 *         description: Unauthorized access - Token is missing or invalid.
@@ -235,7 +250,7 @@ module.exports = app => {
 *                 message: No User ID found
 *                 code: 401
 *       403:
-*         description: User is not authorized to access this resource - Admin role required.
+*         description: User is not authorized to access this resource - Admin or Salon Owner role required.
 *         content:
 *           application/json:
 *             schema:
@@ -252,8 +267,28 @@ module.exports = app => {
 *                   description: Error code.
 *               example:
 *                 success: false
-*                 message: Unauthorized User - Admin role required
+*                 message: Unauthorized User - Admin or Salon Owner role required
 *                 code: 403
+*       404:
+*         description: Customer role not found.
+*         content:
+*           application/json:
+*             schema:
+*               type: object
+*               properties:
+*                 success:
+*                   type: boolean
+*                   description: Indicates if the operation was successful.
+*                 message:
+*                   type: string
+*                   description: Error message.
+*                 code:
+*                   type: integer
+*                   description: Error code.
+*               example:
+*                 success: false
+*                 message: Customer role not found
+*                 code: 404
 *       500:
 *         description: Server error while generating the report.
 *         content:
@@ -275,6 +310,7 @@ module.exports = app => {
 *                 message: Server Error
 *                 code: 500
 */
+
   app.get(`${apiPrefix}/generate-report`, [authenticateToken, authenticateJWT], dashboardController.generateAdminAppointmentReport);
 
 
