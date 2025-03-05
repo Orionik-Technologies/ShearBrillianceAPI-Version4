@@ -831,7 +831,7 @@ const generatePDFWithHTML = async (htmlContent, filePath) => {
 };
 
 // New function to generate styled HTML content
-const generateHTMLReport = (userRole, data, barbersData, startDate, endDate, salonName = '') => {
+const generateHTMLReport = (userRole, data, barbersDataBySalon, startDate, endDate) => {
     const titlePrefix = userRole === role.ADMIN ? 'Admin' : 'Salon Owner';
     let html = `
         <html>
@@ -911,7 +911,7 @@ const generateHTMLReport = (userRole, data, barbersData, startDate, endDate, sal
         </head>
         <body>
             <div class="container">
-                <h1>Shear Brilliance ${titlePrefix} Dashboard${salonName ? ` - ${salonName}` : ''}</h1>
+                <h1>Shear Brilliance ${titlePrefix} Dashboard</h1>
                 <p class="subtitle">Report Date: ${moment().format('YYYY-MM-DD')}</p>
                 <p class="subtitle">Date Range: ${startDate} to ${endDate}</p>
 
@@ -937,52 +937,38 @@ const generateHTMLReport = (userRole, data, barbersData, startDate, endDate, sal
                         <tr><td>Active Appointments</td><td>${data.activeAppointmentsCount}</td></tr>
                     </tbody>
                 </table>
-
-                <h2>${salonName} :Barber Details</h2>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Barber Name</th>
-                            <th>Active</th>
-                            <th>Pending</th>
-                            <th>Completed</th>
-                            <th>Canceled</th>
-                        </tr>
-                    </thead>
-                    <tbody>
     `;
 
-    barbersData.forEach(barber => {
+    // Generate separate sections for each salon
+    for (const [salonName, barbersData] of Object.entries(barbersDataBySalon)) {
         html += `
-            <tr>
-                <td>${barber.barberName}</td>
-                <td>${barber.activeAppointmentsCount}</td>
-                <td>${barber.pendingAppointmentsCount}</td>
-                <td>${barber.completedAppointmentsCount}</td>
-                <td>${barber.canceledAppointmentsCount}</td>
-            </tr>
-        `;
-    });
-
-    html += `
-                    </tbody>
-                </table>
-    `;
-
-    if (salonName) {
-        html += `
-            <h2>${salonName} Summary</h2>
+            <h2>${salonName} - Barber Details</h2>
             <table>
                 <thead>
                     <tr>
-                        <th>Metric</th>
-                        <th>Value</th>
+                        <th>Barber Name</th>
+                        <th>Pending</th>
+                         <th>Active</th>
+                        <th>Completed</th>
+                        <th>Canceled</th>
                     </tr>
                 </thead>
                 <tbody>
-                    <tr><td>Total Barbers</td><td>${data.totalBarbers}</td></tr>
-                    <tr><td>Total Customers</td><td>${data.totalCustomers}</td></tr>
-                    <tr><td>Total Appointments</td><td>${data.totalAppointments}</td></tr>
+        `;
+
+        barbersData.forEach(barber => {
+            html += `
+                <tr>
+                    <td>${barber.barberName}</td>
+                    <td>${barber.pendingAppointmentsCount}</td>
+                    <td>${barber.activeAppointmentsCount}</td>
+                    <td>${barber.completedAppointmentsCount}</td>
+                    <td>${barber.canceledAppointmentsCount}</td>
+                </tr>
+            `;
+        });
+
+        html += `
                 </tbody>
             </table>
         `;
@@ -1030,7 +1016,7 @@ exports.generateAdminAppointmentReport = async (req, res) => {
         }
 
         let data = {};
-        let salonName = '';
+        let barbersDataBySalon = {};
 
         if (userRole === role.ADMIN || userRole === role.SALON_OWNER) {
             let whereConditions = {
@@ -1039,18 +1025,15 @@ exports.generateAdminAppointmentReport = async (req, res) => {
 
             if (salonId) {
                 whereConditions.SalonId = salonId;
-                const salon = await Salon.findByPk(salonId);
-                salonName = salon ? salon.name : 'Unknown Salon';
             }
             if (barberId) {
                 whereConditions.BarberId = barberId;
             }
             if (userRole === role.SALON_OWNER && !salonId) {
                 whereConditions.SalonId = req.user.salonId;
-                const salon = await Salon.findByPk(req.user.salonId);
-                salonName = salon ? salon.name : 'Unknown Salon';
             }
 
+            // Calculate overall appointment stats
             data = {
                 totalAppointments: await Appointment.count({ where: whereConditions }),
                 pendingAppointmentsCount: await Appointment.count({
@@ -1067,103 +1050,67 @@ exports.generateAdminAppointmentReport = async (req, res) => {
                 })
             };
 
-            const customerRole = await roles.findOne({ where: { role_name: role.CUSTOMER } });
-            if (!customerRole) {
-                return res.status(404).json({ success: false, message: "Customer role not found" });
-            }
-
-            let totalSalons, totalCustomers, totalBarbers, allBarbers;
-            let barberWhere = {};
-
-            if (salonId) barberWhere.SalonId = salonId;
-            if (barberId) barberWhere.id = barberId;
-            if (userRole === role.SALON_OWNER && !salonId) barberWhere.SalonId = req.user.salonId;
-
-            if (userRole === role.ADMIN && !salonId && !barberId) {
-                [totalSalons, totalCustomers, totalAppointments, totalBarbers, allBarbers] = await Promise.all([
-                    Salon.count(),
-                    // Count distinct customers from Appointment table
-                    Appointment.count({
-                        where: { 
-                            UserId: { [Op.ne]: null }
-                        },
-                        distinct: true,
-                        col: 'UserId'
-                    }),
-                    // Count total appointments
-                    Appointment.count({
-                        where: { 
-                            UserId: { [Op.ne]: null }
-                        }
-                    }),
-                    Barber.count(),
-                    Barber.findAll({ include: [{ model: Salon, as: 'salon', attributes: ['name'] }] })
-                ]);
+            let salons;
+            if (userRole === role.ADMIN && !salonId) {
+                salons = await Salon.findAll();
             } else {
-                const salonFilter = salonId || (userRole === role.SALON_OWNER ? req.user.salonId : undefined);
-                [totalSalons, totalCustomers, totalAppointments, totalBarbers, allBarbers] = await Promise.all([
-                    Salon.count({ 
-                        where: { 
-                            id: salonFilter
-                        } 
-                    }),
-                    // Count distinct customers for specific salon
-                    Appointment.count({
-                        where: { 
-                            UserId: { [Op.ne]: null },
-                            ...(salonFilter ? { SalonId: salonFilter } : {})
-                        },
-                        distinct: true,
-                        col: 'UserId'
-                    }),
-                    // Count total appointments for specific salon
-                    Appointment.count({
-                        where: { 
-                            UserId: { [Op.ne]: null },
-                            ...(salonFilter ? { SalonId: salonFilter } : {})
-                        }
-                    }),
-                    Barber.count({ where: barberWhere }),
-                    Barber.findAll({ 
-                        where: barberWhere, 
-                        include: [{ model: Salon, as: 'salon', attributes: ['name'] }] 
-                    })
-                ]);
+                const targetSalonId = salonId || (userRole === role.SALON_OWNER ? req.user.salonId : null);
+                salons = targetSalonId ? [await Salon.findByPk(targetSalonId)] : [];
             }
 
-            data.totalSalons = totalSalons;
-            data.totalCustomers = totalCustomers;
-            data.totalBarbers = totalBarbers;
-
-            let barbersData = await Promise.all(allBarbers.map(async (barber) => {
-                const whereClause = {
-                    BarberId: barber.id,
-                    createdAt: { [Op.between]: [new Date(startDate), new Date(endDate)] }
+            data.totalSalons = salons.length;
+            data.totalCustomers = await Appointment.count({
+                where: { 
+                    UserId: { [Op.ne]: null },
+                    ...(salonId ? { SalonId: salonId } : {})
+                },
+                distinct: true,
+                col: 'UserId'
+            });
+            
+            // Group barbers by salon
+            for (const salon of salons) {
+                const barberWhere = {
+                    SalonId: salon.id
                 };
-                if (salonId) whereClause.SalonId = salonId;
-                if (userRole === role.SALON_OWNER && !salonId) whereClause.SalonId = req.user.salonId;
+                if (barberId) barberWhere.id = barberId;
 
-                const [active, pending, completed, canceled] = await Promise.all([
-                    Appointment.count({ where: { ...whereClause, status: 'in_salon' } }),
-                    Appointment.count({ where: { ...whereClause, status: 'checked_in' } }),
-                    Appointment.count({ where: { ...whereClause, status: 'completed' } }),
-                    Appointment.count({ where: { ...whereClause, status: 'canceled' } })
-                ]);
+                const barbers = await Barber.findAll({ 
+                    where: barberWhere,
+                    include: [{ model: Salon, as: 'salon', attributes: ['name'] }] 
+                });
 
-                return {
-                    barberName: barber.name,
-                    activeAppointmentsCount: active,
-                    pendingAppointmentsCount: pending,
-                    completedAppointmentsCount: completed,
-                    canceledAppointmentsCount: canceled
-                };
-            }));
+                const barbersData = await Promise.all(barbers.map(async (barber) => {
+                    const whereClause = {
+                        BarberId: barber.id,
+                        createdAt: { [Op.between]: [new Date(startDate), new Date(endDate)] }
+                    };
+
+                    const [active, pending, completed, canceled] = await Promise.all([
+                        Appointment.count({ where: { ...whereClause, status: 'in_salon' } }),
+                        Appointment.count({ where: { ...whereClause, status: 'checked_in' } }),
+                        Appointment.count({ where: { ...whereClause, status: 'completed' } }),
+                        Appointment.count({ where: { ...whereClause, status: 'canceled' } })
+                    ]);
+
+                    return {
+                        barberName: barber.name,
+                        activeAppointmentsCount: active,
+                        pendingAppointmentsCount: pending,
+                        completedAppointmentsCount: completed,
+                        canceledAppointmentsCount: canceled
+                    };
+                }));
+
+                barbersDataBySalon[salon.name || 'Unknown Salon'] = barbersData;
+                data.totalBarbers = (data.totalBarbers || 0) + barbers.length;
+            }
 
             const fileName = `${userRole.toLowerCase()}_appointment_dashboard_${moment().format('YYYY-MM-DD')}.pdf`;
             const filePath = path.resolve(__dirname, '../public/reports', fileName);
             
             ensureDirectoryExists(filePath);
-            const htmlContent = generateHTMLReport(userRole, data, barbersData, startDate, endDate, salonName);
+            const htmlContent = generateHTMLReport(userRole, data, barbersDataBySalon, startDate, endDate);
             await generatePDFWithHTML(htmlContent, filePath);
             const fileBuffer = fs.readFileSync(filePath);
 
