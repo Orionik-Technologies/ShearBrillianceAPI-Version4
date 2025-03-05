@@ -1,7 +1,8 @@
 const { AppointmentENUM } = require("../config/appointment.config");
 const { BarberCategoryENUM } = require("../config/barberCategory.config");
 const { PaymentMethodENUM } = require("../config/paymentEnums.config");
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const Stripe = require('stripe');
+const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null;
 const db = require("../models");
 const Appointment = db.Appointment;
 const Barber = db.Barber;

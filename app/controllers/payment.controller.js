@@ -1,4 +1,4 @@
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+
 const { end } = require('pdfkit');
 const sendResponse = require('../helpers/responseHelper'); // Import the helper function
 const { isOnlinePaymentEnabled } = require('../helpers/configurationHelper'); // Import the helper function
@@ -14,7 +14,8 @@ const { BarberCategoryENUM } = require('../config/barberCategory.config');
 const { broadcastBoardUpdates } = require('../controllers/socket.controller');
 const { getAppointmentsByRoleExp, handleBarberCategoryLogicExp, prepareEmailDataExp, sendAppointmentNotificationsExp, fetchAppointmentWithServicesExp, validateAndAttachServicesExp, markSlotsAsBookedExp, verifyConsecutiveSlotsExp } = require('../controllers/appointments.controller');
 
-
+const Stripe = require('stripe');
+const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null;
 
 
 exports.createPayment = async (req, res) => {
