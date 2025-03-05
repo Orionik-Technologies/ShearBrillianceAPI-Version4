@@ -938,7 +938,7 @@ const generateHTMLReport = (userRole, data, barbersData, startDate, endDate, sal
                     </tbody>
                 </table>
 
-                <h2>Barber Details</h2>
+                <h2>${salonName} :Barber Details</h2>
                 <table>
                     <thead>
                         <tr>
@@ -1080,16 +1080,49 @@ exports.generateAdminAppointmentReport = async (req, res) => {
             if (userRole === role.SALON_OWNER && !salonId) barberWhere.SalonId = req.user.salonId;
 
             if (userRole === role.ADMIN && !salonId && !barberId) {
-                [totalSalons, totalCustomers, totalBarbers, allBarbers] = await Promise.all([
+                [totalSalons, totalCustomers, totalAppointments, totalBarbers, allBarbers] = await Promise.all([
                     Salon.count(),
-                    User.count({ where: { RoleId: customerRole.id } }),
+                    // Count distinct customers from Appointment table
+                    Appointment.count({
+                        where: { 
+                            UserId: { [Op.ne]: null }
+                        },
+                        distinct: true,
+                        col: 'UserId'
+                    }),
+                    // Count total appointments
+                    Appointment.count({
+                        where: { 
+                            UserId: { [Op.ne]: null }
+                        }
+                    }),
                     Barber.count(),
                     Barber.findAll({ include: [{ model: Salon, as: 'salon', attributes: ['name'] }] })
                 ]);
             } else {
-                [totalSalons, totalCustomers, totalBarbers, allBarbers] = await Promise.all([
-                    Salon.count({ where: { id: salonId || (userRole === role.SALON_OWNER ? req.user.salonId : undefined) } }),
-                    User.count({ where: { RoleId: customerRole.id, ...(salonId ? { SalonId: salonId } : {}) } }),
+                const salonFilter = salonId || (userRole === role.SALON_OWNER ? req.user.salonId : undefined);
+                [totalSalons, totalCustomers, totalAppointments, totalBarbers, allBarbers] = await Promise.all([
+                    Salon.count({ 
+                        where: { 
+                            id: salonFilter
+                        } 
+                    }),
+                    // Count distinct customers for specific salon
+                    Appointment.count({
+                        where: { 
+                            UserId: { [Op.ne]: null },
+                            ...(salonFilter ? { SalonId: salonFilter } : {})
+                        },
+                        distinct: true,
+                        col: 'UserId'
+                    }),
+                    // Count total appointments for specific salon
+                    Appointment.count({
+                        where: { 
+                            UserId: { [Op.ne]: null },
+                            ...(salonFilter ? { SalonId: salonFilter } : {})
+                        }
+                    }),
                     Barber.count({ where: barberWhere }),
                     Barber.findAll({ 
                         where: barberWhere, 
