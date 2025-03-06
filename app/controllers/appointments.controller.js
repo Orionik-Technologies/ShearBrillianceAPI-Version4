@@ -1,7 +1,7 @@
 const { AppointmentENUM } = require("../config/appointment.config");
 const { BarberCategoryENUM } = require("../config/barberCategory.config");
 const { PaymentMethodENUM } = require("../config/paymentEnums.config");
-const { REFUND_PAYMENT} = require("../config/sendGridConfig");
+const { REFUND_PAYMENT } = require("../config/sendGridConfig");
 const Stripe = require('stripe');
 const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null;
 const db = require("../models");
@@ -1221,10 +1221,10 @@ exports.cancel = async (req, res) => {
                         const user = await db.USER.findByPk(appointment.UserId);
 
                         const customerData = {
-                            paymentIntentId:payment.id,
-                            totalAmount:payment.amount,
-                            salonname:salonName.toString(),
-                            location:salonAddress.toString(),
+                            paymentIntentId: payment.id,
+                            totalAmount: payment.amount,
+                            salonname: salonName.toString(),
+                            location: salonAddress.toString(),
                             email_subject: 'Refund Payment',
                         };
 
@@ -2987,6 +2987,45 @@ exports.findOneDetails = async (req, res) => {
         if (!appointment) {
             return sendResponse(res, false, "Appointment not found", null, 404);
         }
+        // Add payment details logic
+        let category = '';
+        if (appointment.Barber && appointment.Barber.category === BarberCategoryENUM.ForAppointment) {
+            category = 'Appointment';
+        } else if (appointment.Barber && appointment.Barber.category === BarberCategoryENUM.ForWalkIn) {
+            category = 'Checked in';
+        }
+
+        const payment = await Payment.findOne({
+            where: { appointmentId: appointment.id },
+            attributes: { exclude: ['createdAt', 'updatedAt', 'deletedAt'] },
+        });
+
+        let receiptUrl = null;
+        if (payment) {
+            try {
+                const paymentIntent = await stripe.paymentIntents.retrieve(payment.paymentIntentId);
+                receiptUrl = paymentIntent.charges?.data[0]?.receipt_url;
+
+                if (!receiptUrl && paymentIntent.latest_charge) {
+                    const charge = await stripe.charges.retrieve(paymentIntent.latest_charge);
+                    receiptUrl = charge.receipt_url;
+                }
+            } catch (error) {
+                console.error(`Error retrieving receipt URL for payment ${payment.id}:`, error);
+            }
+        }
+
+        const paymentDetails = payment ? {
+            id: payment.id,
+            amount: payment.amount,
+            tip: payment.tip,
+            tax: payment.tax,
+            discount: payment.discount,
+            totalAmount: payment.totalAmount,
+            currency: payment.currency,
+            paymentStatus: payment.paymentStatus,
+            receiptUrl: receiptUrl,
+        } : null;
 
         // Get appointment services with potential duplicates
         const appointmentServices = await AppointmentService.findAll({
@@ -3071,6 +3110,8 @@ exports.findOneDetails = async (req, res) => {
 
         // Convert appointment to plain object and add our custom fields
         const appointmentData = appointment.toJSON();
+        appointmentData.category = category;
+        appointmentData.payment = paymentDetails;
         appointmentData.Services = services;
         appointmentData.barbersWithServices = barbersWithServices;
         appointmentData.is_like = isLike;
