@@ -18,6 +18,7 @@ const path = require('path');
 const sendResponse = require('../helpers/responseHelper');  // Import the helper
 const { put } = require('@vercel/blob'); // Import 'put' directly if using Vercel's blob SDK upload method
 const AWS = require('aws-sdk');
+const pdf = require('html-pdf'); // Add this at the top with other imports
 
 const s3 = new AWS.S3({
     endpoint: new AWS.Endpoint('https://tor1.digitaloceanspaces.com'), // Replace with your DigitalOcean Spaces endpoint
@@ -192,22 +193,6 @@ exports.getDashboardData = async (req, res) => {
 
             const paymentTotals = await calculatePaymentTotals({});
 
-            // Repeated Customers (Customers with more than one appointment)
-            const repeatedCustomers = await Appointment.findAll({
-                attributes: ['UserId', [db.sequelize.fn('COUNT', db.sequelize.col('id')), 'appointmentCount']],
-                group: ['UserId'],
-                having: db.sequelize.literal('COUNT(id) > 1'),
-            });
-
-            // New Customers (Customers created this month)
-            const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-            const newCustomers = await User.count({
-                where: {
-                    RoleId: customerRole.id,
-                    createdAt: { [Op.gte]: startOfMonth },
-                }
-            });
-
             data = {
                
                 // totalAdmins: await User.count({ where: { RoleId: adminRole.id } }),
@@ -228,8 +213,6 @@ exports.getDashboardData = async (req, res) => {
                 topSalonsWithDetails,
                 topBarbersWithDetails,
                 topServicesWithDetails,
-                repeatedCustomersCount: repeatedCustomers.length,
-                newCustomersCount: newCustomers,
                 revenue: {
                     online: paymentTotals.online,
                     offline: paymentTotals.offline,
@@ -325,22 +308,6 @@ exports.getDashboardData = async (req, res) => {
                 }
             });
 
-              // Repeated Customers (Customers with more than one appointment)
-              const repeatedCustomers = await Appointment.findAll({
-                attributes: ['UserId', [db.sequelize.fn('COUNT', db.sequelize.col('id')), 'appointmentCount']],
-                group: ['UserId'],
-                having: db.sequelize.literal('COUNT(id) > 1'),
-            });
-
-            // New Customers (Customers created this month)
-            const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-            const newCustomers = await User.count({
-                where: {
-                    RoleId: customerRole.id,
-                    createdAt: { [Op.gte]: startOfMonth },
-                }
-            });
-
         
             data = {
                 totalBarbers,
@@ -352,8 +319,6 @@ exports.getDashboardData = async (req, res) => {
                 completedWalkInCount,
                 canceledAppointmentsCount,
                 pendingFutureAppointmentsCount,
-                repeatedCustomersCount: repeatedCustomers.length,
-                newCustomersCount: newCustomers,
                 revenue: {
                     online: paymentTotals.online,
                     offline: paymentTotals.offline,
@@ -842,6 +807,183 @@ const ensureDirectoryExists = (filePath) => {
     }
 };
 
+// New function to generate PDF using html-pdf
+const generatePDFWithHTML = async (htmlContent, filePath) => {
+    const pdfOptions = {
+        format: 'A4',
+        orientation: 'portrait',
+        border: {
+            top: '20mm',
+            bottom: '20mm',
+            left: '15mm',
+            right: '15mm'
+        },
+        type: 'pdf'
+    };
+
+    return new Promise((resolve, reject) => {
+        ensureDirectoryExists(filePath);
+        pdf.create(htmlContent, pdfOptions).toFile(filePath, (err, result) => {
+            if (err) return reject(err);
+            resolve(result.filename);
+        });
+    });
+};
+
+// New function to generate styled HTML content
+const generateHTMLReport = (userRole, data, barbersDataBySalon, startDate, endDate) => {
+    const titlePrefix = userRole === role.ADMIN ? 'Admin' : 'Salon Owner';
+    let html = `
+        <html>
+        <head>
+            <style>
+                body {
+                    font-family: 'Helvetica', sans-serif;
+                    margin: 0;
+                    padding: 0;
+                    color: #333;
+                }
+                .container {
+                    width: 100%;
+                    max-width: 800px;
+                    margin: 0 auto;
+                }
+                h1 {
+                    text-align: center;
+                    color: #2c3e50;
+                    font-size: 28px;
+                    margin-bottom: 10px;
+                }
+                .subtitle {
+                    text-align: center;
+                    font-size: 14px;
+                    color: #7f8c8d;
+                    margin-bottom: 20px;
+                }
+                h2 {
+                    color: #be9342;
+                    font-size: 20px;
+                    border-bottom: 2px solid #be9342;
+                    padding-bottom: 5px;
+                    margin-top: 30px;
+                }
+                table {
+                    width: 100%;
+                    border-collapse: collapse;
+                    margin-bottom: 20px;
+                    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+                }
+                th, td {
+                    border: 1px solid #ddd;
+                    padding: 10px;
+                    text-align: left;
+                    font-size: 12px;
+                }
+                th {
+                    background-color: #be9342;
+                    color: white;
+                    font-weight: bold;
+                }
+                td:nth-child(n+2) {
+                    text-align: right;
+                }
+                tr:nth-child(even) {
+                    background-color: #f9f9f9;
+                }
+                tr:hover {
+                    background-color: #f1f1f1;
+                }
+                .summary {
+                    font-size: 14px;
+                    color: #2c3e50;
+                    margin-top: 15px;
+                    padding: 10px;
+                    background-color: #ecf0f1;
+                    border-radius: 5px;
+                }
+                .footer {
+                    text-align: center;
+                    font-size: 10px;
+                    color: #95a5a6;
+                    margin-top: 30px;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h1>Shear Brilliance ${titlePrefix} Dashboard</h1>
+                <p class="subtitle">Report Date: ${moment().format('YYYY-MM-DD')}</p>
+                <p class="subtitle">Date Range: ${startDate} to ${endDate}</p>
+
+                <div class="summary">
+                    <p>Total Salons: ${data.totalSalons}</p>
+                    <p>Total Customers: ${data.totalCustomers}</p>
+                    <p>Total Barbers: ${data.totalBarbers}</p>
+                </div>
+
+                <h2>Appointment Summary</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Status</th>
+                            <th>Count</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>Total Appointments</td><td>${data.totalAppointments}</td></tr>
+                        <tr><td>Pending Appointments</td><td>${data.pendingAppointmentsCount}</td></tr>
+                        <tr><td>Completed Appointments</td><td>${data.completedAppointmentsCount}</td></tr>
+                        <tr><td>Canceled Appointments</td><td>${data.canceledAppointmentsCount}</td></tr>
+                        <tr><td>Active Appointments</td><td>${data.activeAppointmentsCount}</td></tr>
+                    </tbody>
+                </table>
+    `;
+
+    // Generate separate sections for each salon
+    for (const [salonName, barbersData] of Object.entries(barbersDataBySalon)) {
+        html += `
+            <h2>${salonName} - Barber Details</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Barber Name</th>
+                        <th>Pending</th>
+                         <th>Active</th>
+                        <th>Completed</th>
+                        <th>Canceled</th>
+                    </tr>
+                </thead>
+                <tbody>
+        `;
+
+        barbersData.forEach(barber => {
+            html += `
+                <tr>
+                    <td>${barber.barberName}</td>
+                    <td>${barber.pendingAppointmentsCount}</td>
+                    <td>${barber.activeAppointmentsCount}</td>
+                    <td>${barber.completedAppointmentsCount}</td>
+                    <td>${barber.canceledAppointmentsCount}</td>
+                </tr>
+            `;
+        });
+
+        html += `
+                </tbody>
+            </table>
+        `;
+    }
+
+    html += `
+                <div class="footer">
+                    <p>Generated by Shear Brilliance - All Rights Reserved</p>
+                </div>
+            </div>
+        </body>
+        </html>
+    `;
+    return html;
+};
 
 exports.generateAdminAppointmentReport = async (req, res) => {
     try {
@@ -863,15 +1005,10 @@ exports.generateAdminAppointmentReport = async (req, res) => {
         }
 
         const userRole = user.role.role_name;
-        const salonId = req.user.salonId;
+        const { startDate, endDate, salonId, barberId } = req.query;
 
-        // Extract and validate dates
-        const { startDate, endDate } = req.query;
         if (!startDate || !endDate) {
-            return res.status(400).json({ 
-                success: false, 
-                message: "Start date and end date are required" 
-            });
+            return res.status(400).json({ success: false, message: "Start date and end date are required" });
         }
 
         if (isNaN(new Date(startDate).getTime()) || isNaN(new Date(endDate).getTime())) {
@@ -879,210 +1016,120 @@ exports.generateAdminAppointmentReport = async (req, res) => {
         }
 
         let data = {};
+        let barbersDataBySalon = {};
 
         if (userRole === role.ADMIN || userRole === role.SALON_OWNER) {
-            // Base query conditions
             let whereConditions = {
                 createdAt: { [Op.between]: [new Date(startDate), new Date(endDate)] }
             };
 
-            // Add salon filter for salon owner
-            if (userRole === role.SALON_OWNER) {
+            if (salonId) {
                 whereConditions.SalonId = salonId;
             }
+            if (barberId) {
+                whereConditions.BarberId = barberId;
+            }
+            if (userRole === role.SALON_OWNER && !salonId) {
+                whereConditions.SalonId = req.user.salonId;
+            }
 
-            // Fetch appointment data
+            // Calculate overall appointment stats
             data = {
-                totalAppointments: await Appointment.count({
-                    where: whereConditions
-                }),
+                totalAppointments: await Appointment.count({ where: whereConditions }),
                 pendingAppointmentsCount: await Appointment.count({
-                    where: {
-                        ...whereConditions,
-                        status: 'checked_in'
-                    }
+                    where: { ...whereConditions, status: 'checked_in' }
                 }),
                 completedAppointmentsCount: await Appointment.count({
-                    where: {
-                        ...whereConditions,
-                        status: 'completed'
-                    }
+                    where: { ...whereConditions, status: 'completed' }
                 }),
                 canceledAppointmentsCount: await Appointment.count({
-                    where: {
-                        ...whereConditions,
-                        status: 'canceled'
-                    }
+                    where: { ...whereConditions, status: 'canceled' }
                 }),
                 activeAppointmentsCount: await Appointment.count({
-                    where: {
-                        ...whereConditions,
-                        status: 'in_salon'
-                    }
+                    where: { ...whereConditions, status: 'in_salon' }
                 })
             };
 
-            // Fetch totals based on role
-            const customerRole = await roles.findOne({ where: { role_name: role.CUSTOMER } });
-
-            if (!customerRole) {
-                return sendResponse(res, false, "Customer role not found", null, 404);
-            }
-
-            let totalSalons, totalCustomers, totalBarbers, allBarbers;
-
-            if (userRole === role.ADMIN) {
-                [totalSalons, totalCustomers, totalBarbers, allBarbers] = await Promise.all([
-                    Salon.count(),
-                    User.count({ where: { RoleId: customerRole.id } }),
-                    Barber.count(),
-                    Barber.findAll()
-                ]);
+            let salons;
+            if (userRole === role.ADMIN && !salonId) {
+                salons = await Salon.findAll();
             } else {
-                [totalSalons, totalCustomers, totalBarbers, allBarbers] = await Promise.all([
-                    Salon.count({ where: { id: salonId } }),
-                    User.count({ where: { RoleId: customerRole.id, id: salonId } }),
-                    Barber.count({ where: { SalonId: salonId } }),
-                    Barber.findAll({ where: { SalonId: salonId } })
-                ]);
+                const targetSalonId = salonId || (userRole === role.SALON_OWNER ? req.user.salonId : null);
+                salons = targetSalonId ? [await Salon.findByPk(targetSalonId)] : [];
             }
 
-            data.totalSalons = totalSalons;
-            data.totalCustomers = totalCustomers;
-            data.totalBarbers = totalBarbers;
-
-            // Fetch barber statistics
-            let barbersData = await Promise.all(allBarbers.map(async (barber) => {
-                const whereClause = { BarberId: barber.id };
-                if (userRole === role.SALON_OWNER) {
-                    whereClause.SalonId = salonId;
-                }
-
-                const [active, pending, completed, canceled] = await Promise.all([
-                    Appointment.count({ where: { ...whereClause, status: 'in_salon' } }),
-                    Appointment.count({ where: { ...whereClause, status: 'checked_in' } }),
-                    Appointment.count({ where: { ...whereClause, status: 'completed' } }),
-                    Appointment.count({ where: { ...whereClause, status: 'canceled' } })
-                ]);
-
-                return {
-                    barberName: barber.name,
-                    activeAppointmentsCount: active,
-                    pendingAppointmentsCount: pending,
-                    completedAppointmentsCount: completed,
-                    canceledAppointmentsCount: canceled
+            data.totalSalons = salons.length;
+            data.totalCustomers = await Appointment.count({
+                where: { 
+                    UserId: { [Op.ne]: null },
+                    ...(salonId ? { SalonId: salonId } : {})
+                },
+                distinct: true,
+                col: 'UserId'
+            });
+            
+            // Group barbers by salon
+            for (const salon of salons) {
+                const barberWhere = {
+                    SalonId: salon.id
                 };
-            }));
+                if (barberId) barberWhere.id = barberId;
 
-            // Generate PDF
+                const barbers = await Barber.findAll({ 
+                    where: barberWhere,
+                    include: [{ model: Salon, as: 'salon', attributes: ['name'] }] 
+                });
+
+                const barbersData = await Promise.all(barbers.map(async (barber) => {
+                    const whereClause = {
+                        BarberId: barber.id,
+                        createdAt: { [Op.between]: [new Date(startDate), new Date(endDate)] }
+                    };
+
+                    const [active, pending, completed, canceled] = await Promise.all([
+                        Appointment.count({ where: { ...whereClause, status: 'in_salon' } }),
+                        Appointment.count({ where: { ...whereClause, status: 'checked_in' } }),
+                        Appointment.count({ where: { ...whereClause, status: 'completed' } }),
+                        Appointment.count({ where: { ...whereClause, status: 'canceled' } })
+                    ]);
+
+                    return {
+                        barberName: barber.name,
+                        activeAppointmentsCount: active,
+                        pendingAppointmentsCount: pending,
+                        completedAppointmentsCount: completed,
+                        canceledAppointmentsCount: canceled
+                    };
+                }));
+
+                barbersDataBySalon[salon.name || 'Unknown Salon'] = barbersData;
+                data.totalBarbers = (data.totalBarbers || 0) + barbers.length;
+            }
+
             const fileName = `${userRole.toLowerCase()}_appointment_dashboard_${moment().format('YYYY-MM-DD')}.pdf`;
             const filePath = path.resolve(__dirname, '../public/reports', fileName);
             
             ensureDirectoryExists(filePath);
-            const doc = new PDFDocument();
+            const htmlContent = generateHTMLReport(userRole, data, barbersDataBySalon, startDate, endDate);
+            await generatePDFWithHTML(htmlContent, filePath);
+            const fileBuffer = fs.readFileSync(filePath);
 
-            // Header section
-            const titlePrefix = userRole === role.ADMIN ? 'Admin' : 'Salon Owner';
-            doc.fontSize(16).text(`Shear Brilliance ${titlePrefix} Dashboard`, { align: 'center' });
-            doc.moveDown(1);
-            doc.fontSize(12).text(`Report Date: ${moment().format('YYYY-MM-DD')}`, { align: 'center' });
-            doc.text(`Date Range: ${startDate} to ${endDate}`, { align: 'center' });
-            doc.moveDown(2);
+            const uploadParams = {
+                Bucket: process.env.DO_SPACES_BUCKET,
+                Key: `reports/${fileName}`,
+                Body: fileBuffer,
+                ACL: 'public-read',
+                ContentType: 'application/pdf',
+            };
 
-            // Summary section
-            doc.fontSize(12).text(`Total Salons: ${data.totalSalons}`, { align: 'center' });
-            doc.fontSize(12).text(`Total Customers: ${data.totalCustomers}`, { align: 'center' });
-            doc.fontSize(12).text(`Total Barbers: ${data.totalBarbers}`, { align: 'center' });
-            doc.moveDown(2);
+            const uploadResult = await s3.upload(uploadParams).promise();
+            fs.unlinkSync(filePath);
 
-            // Table section
-            const columnWidth = 180;
-            const rowHeight = 20;
-            const tableWidth = 2 * columnWidth;
-            const pageWidth = doc.page.width;
-            const marginLeft = (pageWidth - tableWidth) / 2;
-            
-            const headerY = doc.y;
-
-            // Table headers
-            doc.fontSize(12).text('Status', marginLeft, headerY);
-            doc.text('Count', marginLeft + columnWidth, headerY);
-
-            doc.moveDown(1);
-            doc.lineWidth(1)
-                .moveTo(marginLeft, doc.y)
-                .lineTo(marginLeft + tableWidth, doc.y)
-                .stroke();
-            doc.moveDown();
-
-            // Table data
-            const tableData = [
-                ['Total Appointments', data.totalAppointments],
-                ['Pending Appointments', data.pendingAppointmentsCount],
-                ['Completed Appointments', data.completedAppointmentsCount],
-                ['Canceled Appointments', data.canceledAppointmentsCount],
-                ['Active Appointments', data.activeAppointmentsCount]
-            ];
-
-            tableData.forEach((row) => {
-                const yPosition = doc.y;
-                doc.text(row[0], marginLeft, yPosition);
-                doc.text(row[1], marginLeft + columnWidth, yPosition);
-
-                doc.moveTo(marginLeft, yPosition + rowHeight)
-                    .lineTo(marginLeft + tableWidth, yPosition + rowHeight)
-                    .stroke();
-
-                doc.moveDown(1);
+            res.status(200).json({
+                success: true,
+                message: 'PDF report generated successfully',
+                downloadLink: uploadResult.Location,
             });
-
-            // Barber details page
-            doc.addPage();
-            doc.fontSize(14).text('Barber Details', { align: 'center' });
-            doc.moveDown(1);
-
-            barbersData.forEach(barber => {
-                doc.fontSize(12).text(`Barber: ${barber.barberName}`, { align: 'left' });
-                doc.text(`Active Appointments: ${barber.activeAppointmentsCount}`, { align: 'left' });
-                doc.text(`Pending Appointments: ${barber.pendingAppointmentsCount}`, { align: 'left' });
-                doc.text(`Completed Appointments: ${barber.completedAppointmentsCount}`, { align: 'left' });
-                doc.text(`Canceled Appointments: ${barber.canceledAppointmentsCount}`, { align: 'left' });
-                doc.moveDown(1);
-            });
-
-            try {
-                await generatePDF(doc, filePath);
-                const fileBuffer = fs.readFileSync(filePath);
-
-                const uploadParams = {
-                    Bucket: process.env.DO_SPACES_BUCKET,
-                    Key: `reports/${fileName}`,
-                    Body: fileBuffer,
-                    ACL: 'public-read',
-                    ContentType: 'application/pdf',
-                };
-
-                const uploadResult = await s3.upload(uploadParams).promise();
-                
-                // Clean up local file
-                fs.unlinkSync(filePath);
-
-                res.status(200).json({
-                    success: true,
-                    message: 'PDF report generated successfully',
-                    downloadLink: uploadResult.Location,
-                });
-            } catch (err) {
-                console.error('Error in PDF generation or upload:', err);
-                if (fs.existsSync(filePath)) {
-                    fs.unlinkSync(filePath);
-                }
-                res.status(500).json({ 
-                    success: false, 
-                    message: 'Error generating or uploading PDF report',
-                    error: err.message 
-                });
-            }
         } else {
             return res.status(403).json({ success: false, message: 'Role not authorized' });
         }
@@ -1091,7 +1138,6 @@ exports.generateAdminAppointmentReport = async (req, res) => {
         res.status(500).json({ success: false, message: 'Server Error', code: 500 });
     }
 };
-
 // Helper function to calculate date ranges
 const getDateRange = (filter) => {
     const today = new Date();
@@ -1284,6 +1330,7 @@ exports.GetnewCustomers = async (req, res) => {
 };
 
 
+
 exports.customerStatus = async (req, res) => {
     const { filter } = req.query;
     try {
@@ -1291,25 +1338,26 @@ exports.customerStatus = async (req, res) => {
         const userId = req.user ? req.user.id : null;
 
         if (!userId) {
-              return res.status(401).json({ success: false, message: 'Unauthorized: No user ID found', code: 401 });
+            return res.status(401).json({ success: false, message: 'Unauthorized: No user ID found', code: 401 });
         }
-  
-          // Step 2: Fetch the user and their role (ensure the role is included in the query)
-        const user = await User.findByPk(userId, { include: {
-              model: roles,  // Include the associated Role model
-              as: 'role',    // Alias for the Role model (adjust based on your model's actual alias)
-        } });
-  
-        if (!user || !user.role) {
-              return res.status(403).json({ success: false, message: 'Unauthorized User' });
-        }
-  
-        const userRole = user.role.role_name;
 
+        // Step 2: Fetch the user and their role
+        const user = await User.findByPk(userId, {
+            include: {
+                model: roles,  // Include the associated Role model
+                as: 'role',
+            },
+        });
+
+        if (!user || !user.role) {
+            return res.status(403).json({ success: false, message: 'Unauthorized User', code: 403 });
+        }
+
+        const userRole = user.role.role_name;
 
         // Validate filter
         if (!filter || !['today', 'last_7_days', 'last_30_days'].includes(filter)) {
-            return res.status(400).json({ error: 'Invalid filter' });
+            return res.status(400).json({ success: false, message: 'Invalid filter', code: 400 });
         }
 
         // Get date range
@@ -1318,13 +1366,11 @@ exports.customerStatus = async (req, res) => {
         let whereCondition = {}; // Default condition
 
         // Apply role-based conditions
-        if (userRole === role.SALON_OWNER || userRole === role.SALON_MANAGER) {
+        if (userRole === role.SALON_MANAGER || userRole === role.SALON_OWNER) {
             whereCondition.SalonId = req.user.salonId;
-        } else if (userRole === role.BARBER) {
+        } else if (userRole === 'BARBER') {
             whereCondition.BarberId = req.user.barberId;
         }
-
-        // Step 3: Fetch customer statistics
 
         // **Repeated Customers** (Users with multiple appointments)
         const repeatedCustomers = await Appointment.findAll({
@@ -1337,28 +1383,26 @@ exports.customerStatus = async (req, res) => {
             having: db.sequelize.literal('COUNT(id) > 1'),
         });
 
-        const customerRole = await db.roles.findOne({ where: { role_name: role.CUSTOMER } });
-
-        // **New Customers** (Customers created within the date range)
-
-        const newCustomers = await User.count({
+        // **New Customers** (Users who had their first appointment within the date range)
+        const newCustomers = await Appointment.findAll({
+            attributes: ['UserId'],
             where: {
-                RoleId: customerRole.id,
-                createdAt: { [Op.between]: [startDate, endDate] },
                 ...whereCondition,
-            }
+                createdAt: { [Op.between]: [startDate, endDate] },
+            },
+            group: ['UserId'],
         });
 
-       // **Total Customers** (All customers)
-       const totalCustomers = newCustomers + repeatedCustomers.length;
+        // **Total Customers** (All customers)
+        const totalCustomers = newCustomers.length + repeatedCustomers.length;
 
         // Step 4: Format response
         res.json({
             success: true,
-            message: `Customer statistics retrieved successfully!`,
+            message: 'Customer statistics retrieved successfully!',
             data: {
                 repeatedCustomers: repeatedCustomers.length,
-                newCustomers,
+                newCustomers: newCustomers.length,
                 totalCustomers
             },
             code: 200

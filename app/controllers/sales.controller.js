@@ -387,6 +387,216 @@ exports.gettopService = async (req, res) => {
     }
 };
 
+exports.getTopSalons = async (req, res) => {
+    try {
+        // Step 1: Extract the userId from the JWT token (req.user should already have the decoded token)
+        const userId = req.user ? req.user.id : null;
+
+        if (!userId) {
+            return res.status(401).json({ success: false, message: 'Unauthorized: No user ID found', code: 401 });
+        }
+
+        // Step 2: Fetch the user and their role
+        const user = await User.findByPk(userId, {
+            include: {
+                model: roles,  // Include the Role model
+                as: 'role',    // Alias for the Role model
+            }
+        });
+
+        if (!user || !user.role) {
+            return res.status(403).json({ success: false, message: 'Unauthorized User' });
+        }
+
+        const userRole = user.role.role_name;
+
+        let topSalonsWithDetails = [];
+        if (userRole === role.ADMIN) {
+            // Fetch top 3 salons by number of appointments
+            const topSalons = await Appointment.findAll({
+                attributes: [
+                    'SalonId',
+                    [db.sequelize.fn('COUNT', db.sequelize.col('id')), 'appointmentsCount']
+                ],
+                group: ['SalonId'],
+                order: [[db.sequelize.fn('COUNT', db.sequelize.col('id')), 'DESC']],
+                limit: 3,
+            });
+
+            // Fetch salon details for the top 3 salons
+            const salonIds = topSalons.map(salon => salon.SalonId);
+            const salonData = await Salon.findAll({
+                where: { id: salonIds },
+                attributes: ['id', 'name'], // Fetch salon details like id and name
+            });
+
+            // Combine salon data with appointment counts
+            topSalonsWithDetails = topSalons.map(salon => {
+                const salonDetails = salonData.find(s => s.id === salon.SalonId);
+                return {
+                    salonId: salon.SalonId,
+                    appointmentsCount: salon.dataValues.appointmentsCount,
+                    salonName: salonDetails ? salonDetails.name : 'Unknown',
+                };
+            });
+        } else if (userRole === role.SALON_MANAGER) {
+            // For SALON_MANAGER, fetch data only for their specific salon
+            const salonUsage = await db.sequelize.query(
+                `
+                SELECT 
+                  "Appointments"."SalonId" AS salonId,
+                  COUNT("Appointments"."id") AS appointmentsCount,
+                  "Salons"."name" AS salonName
+                FROM 
+                  public."Appointments" AS "Appointments"
+                INNER JOIN 
+                  public."Salons" ON "Appointments"."SalonId" = "Salons"."id"
+                WHERE 
+                  "Appointments"."SalonId" = :salonId
+                GROUP BY 
+                  "Appointments"."SalonId", 
+                  "Salons"."id", 
+                  "Salons"."name"
+                `,
+                {
+                    replacements: { salonId: req.user.salonId }, // Replace :salonId with the user's salonId
+                    type: db.sequelize.QueryTypes.SELECT, // Specify query type
+                }
+            );
+
+            // Map the results to the desired format
+            topSalonsWithDetails = salonUsage.map(salon => ({
+                salonId: salon.salonid,
+                appointmentsCount: salon.appointmentscount,
+                salonName: salon.salonname,
+            }));
+        }
+
+        res.json({
+            success: true,
+            message: 'Top salons data retrieved successfully',
+            data: topSalonsWithDetails,
+        });
+    } catch (error) {
+        console.error('Error fetching top salons data:', error);
+        res.status(500).json({ success: false, message: 'Server Error' });
+    }
+};
+
+exports.getTopBarbers = async (req, res) => {
+    try {
+        // Step 1: Extract the userId from the JWT token (req.user should already have the decoded token)
+        const userId = req.user ? req.user.id : null;
+
+        if (!userId) {
+            return res.status(401).json({ success: false, message: 'Unauthorized: No user ID found', code: 401 });
+        }
+
+        // Step 2: Fetch the user and their role
+        const user = await User.findByPk(userId, {
+            include: {
+                model: roles,  // Include the Role model
+                as: 'role',    // Alias for the Role model
+            }
+        });
+
+        if (!user || !user.role) {
+            return res.status(403).json({ success: false, message: 'Unauthorized User' });
+        }
+
+        const userRole = user.role.role_name;
+
+        let topBarbersWithDetails = [];
+        if (userRole === role.ADMIN) {
+            // Fetch top 5 barbers by number of appointments
+            const topBarbers = await Appointment.findAll({
+                attributes: [
+                    'BarberId',
+                    [db.sequelize.fn('COUNT', db.sequelize.col('id')), 'appointmentsCount']
+                ],
+                group: ['BarberId'],
+                order: [[db.sequelize.fn('COUNT', db.sequelize.col('id')), 'DESC']],
+                limit: 5,
+            });
+
+            // Fetch barber details including SalonId
+            const barberIds = topBarbers.map(barber => barber.BarberId);
+            const barberData = await Barber.findAll({
+                where: { id: barberIds },
+                attributes: ['id', 'name', 'SalonId'], // Include SalonId
+            });
+
+            // Fetch salon details for the barbers' salons
+            const salonIds = barberData.map(barber => barber.SalonId).filter(id => id); // Filter out null/undefined
+            const salonData = await Salon.findAll({
+                where: { id: salonIds },
+                attributes: ['id', 'name'], // Assuming 'name' is the salon name field
+            });
+
+            // Map top barbers with their details and salon name
+            topBarbersWithDetails = topBarbers.map(barber => {
+                const barberDetails = barberData.find(b => b.id === barber.BarberId);
+                const salonDetails = salonData.find(s => s.id === barberDetails?.SalonId);
+                return {
+                    barberId: barber.BarberId,
+                    appointmentsCount: barber.dataValues.appointmentsCount,
+                    barberName: barberDetails ? barberDetails.name : 'Unknown',
+                    salonName: salonDetails ? salonDetails.name : 'Unknown',
+                };
+            });
+        } else if (userRole === role.SALON_MANAGER) {
+            // Query for barber usage data specific to the salon, including salon name
+            const barbersUsage = await db.sequelize.query(
+                `
+                SELECT 
+                  "Appointments"."BarberId" AS barberId,
+                  COUNT("Appointments"."id") AS appointmentsCount,
+                  "Barbers"."name" AS barberName,
+                  "Salons"."name" AS salonName
+                FROM 
+                  public."Appointments" AS "Appointments"
+                INNER JOIN 
+                  public."Barbers" ON "Appointments"."BarberId" = "Barbers"."id"
+                INNER JOIN 
+                  public."Salons" ON "Barbers"."SalonId" = "Salons"."id"
+                WHERE 
+                  "Appointments"."SalonId" = :salonId
+                GROUP BY 
+                  "Appointments"."BarberId", 
+                  "Barbers"."id", 
+                  "Barbers"."name",
+                  "Salons"."id",
+                  "Salons"."name"
+                ORDER BY 
+                  appointmentsCount DESC
+                LIMIT 5
+                `,
+                {
+                    replacements: { salonId: req.user.salonId }, // Replace :salonId with the user's salonId
+                    type: db.sequelize.QueryTypes.SELECT, // Specify query type
+                }
+            );
+
+            // Map the results to the desired format
+            topBarbersWithDetails = barbersUsage.map(barber => ({
+                barberId: barber.barberid,
+                appointmentsCount: barber.appointmentscount,
+                barberName: barber.barbername,
+                salonName: barber.salonname,
+            }));
+        }
+
+        res.json({
+            success: true,
+            message: 'Top barbers data retrieved successfully',
+            data: topBarbersWithDetails,
+        });
+    } catch (error) {
+        console.error('Error fetching top barbers data:', error);
+        res.status(500).json({ success: false, message: 'Server Error' });
+    }
+};
+
 
 exports.getPaymentData = async (req, res) => {
     try {
@@ -724,9 +934,9 @@ function generateHTMLReport(formattedDataBySalon, salonMap, start, end, timezone
                     margin-bottom: 20px;
                 }
                 h2 {
-                    color: #2980b9;
+                    color: #be9342;
                     font-size: 20px;
-                    border-bottom: 2px solid #3498db;
+                    border-bottom: 2px solid #be9342;
                     padding-bottom: 5px;
                     margin-top: 30px;
                 }
@@ -739,11 +949,11 @@ function generateHTMLReport(formattedDataBySalon, salonMap, start, end, timezone
                 th, td {
                     border: 1px solid #ddd;
                     padding: 10px;
-                    text-align: left;
+                    text-align: right;
                     font-size: 12px;
                 }
                 th {
-                    background-color: #3498db;
+                    background-color: #be9342;
                     color: white;
                     font-weight: bold;
                 }
