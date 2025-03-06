@@ -1,6 +1,7 @@
 const { AppointmentENUM } = require("../config/appointment.config");
 const { BarberCategoryENUM } = require("../config/barberCategory.config");
 const { PaymentMethodENUM } = require("../config/paymentEnums.config");
+const { REFUND_PAYMENT} = require("../config/sendGridConfig");
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const db = require("../models");
 const Appointment = db.Appointment;
@@ -275,8 +276,8 @@ async function sendAppointmentNotifications(appointment, name, mobile_number, us
     const salonName = salon ? salon.name : 'the selected salon';
 
     const message = `Dear ${name}, your appointment has been successfully booked at ${salonName}. ${appointment.estimated_wait_time
-            ? `The estimated wait time is ${appointment.estimated_wait_time} minutes.`
-            : `Your appointment is scheduled for ${appointment.appointment_date} at ${appointment.appointment_start_time}.`
+        ? `The estimated wait time is ${appointment.estimated_wait_time} minutes.`
+        : `Your appointment is scheduled for ${appointment.appointment_date} at ${appointment.appointment_start_time}.`
         } We look forward to serving you.`;
 
     try {
@@ -472,7 +473,7 @@ async function handleBarberCategoryLogic(barber, user_id, totalServiceTime, appo
             appointmentData.appointment_start_time = slot.start_time;
             appointmentData.appointment_end_time = endTime.toTimeString().split(' ')[0];
 
-            
+
             // Mark slots as booked
             //await markSlotsAsBooked(requiredSlots);
         }
@@ -1215,16 +1216,28 @@ exports.cancel = async (req, res) => {
                             paymentStatus: 'Processing',
                         });
 
+
+                        const user = await db.USER.findByPk(appointment.UserId);
+
+                        const customerData = {
+                            paymentIntentId:payment.id,
+                            totalAmount:payment.amount,
+                            salonname:salonName.toString(),
+                            location:salonAddress.toString(),
+                            email_subject: 'Refund Payment',
+                        };
+
+                        await sendEmail(user.email, "Refund Payment", REFUND_PAYMENT, customerData);
                         console.log(`Refund initiated for Payment Intent ${appointment.stripePaymentIntentId}: Refund ID ${refund.id}`);
                     } catch (refundError) {
                         if (refundError.code === 'charge_already_refunded') {
-                            
+
                             // Update Payment and Appointment to "Processing" during refund
                             await payment.update({
                                 paymentStatus: 'Refunded',
                             });
                             await handleAppointmentCancellation(appointment, res);
-                            
+
                         }
                         console.error("Error initiating refund:", refundError);
                         return sendResponse(res, false, "Failed to initiate refund", null, 500);
