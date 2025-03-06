@@ -10,12 +10,70 @@ const { appCheck } = require('firebase-admin');
 const { sendEmail } = require("../services/emailService");
 const { sendMessageToUser } = require('./socket.controller');
 const { sendSMS } = require('../services/smsService');
+const { AppointmentENUM } = require("../config/appointment.config");
 const { BarberCategoryENUM } = require('../config/barberCategory.config');
 const { broadcastBoardUpdates } = require('../controllers/socket.controller');
-const { getAppointmentsByRoleExp, handleBarberCategoryLogicExp, prepareEmailDataExp, sendAppointmentNotificationsExp, fetchAppointmentWithServicesExp, validateAndAttachServicesExp, markSlotsAsBookedExp, verifyConsecutiveSlotsExp } = require('../controllers/appointments.controller');
+const { getAppointmentsByRoleExp, handleBarberCategoryLogicExp, prepareEmailDataExp, sendAppointmentNotificationsExp, fetchAppointmentWithServicesExp, validateAndAttachServicesExp, markSlotsAsBookedExp, verifyConsecutiveSlotsExp, markSlotsAsRelesedExp } = require('../controllers/appointments.controller');
+
+/* function for checked_in appointment time calculations start */
+
+// Function to calculate estimated wait time for a particular barber
+const getEstimatedWaitTimeForBarber = async (barberId) => {
+    // Fetch all appointments for the barber that are 'checked_in' or 'in_salon'
+    const appointments = await Appointment.findAll({
+        where: { BarberId: barberId, status: ['checked_in', 'in_salon'] },
+        order: [['queue_position', 'ASC']], // Order by queue position to process in order
+        include: [{
+            model: Service,
+            attributes: ['id', 'default_service_time'], // Fetch the 'estimated_service_time' from the Service model
+            through: { attributes: [] } // Avoid extra attributes from the join table
+        }],
+    });
+
+    let cumulativeQueuePosition = 0; // To track the cumulative number of people in the queue
+    let cumulativeWaitTime = 0; // To track the cumulative wait time
+
+    let applength = appointments.length;
+
+    if (applength > 0) {
+        // Check if there is only one 'in_salon' user
+        const inSalonUser = appointments.find(a => a.status === 'in_salon');
+        const checkedInUsers = appointments.filter(a => a.status === 'checked_in');
+
+        if (inSalonUser && checkedInUsers.length === 0) {
+            const currentTime = new Date();
+
+            // Calculate elapsed time since the user was marked 'in_salon'
+            const inSalonTime = new Date(inSalonUser.in_salon_time); // Start time of `in_salon` status
+            const elapsedTime = Math.floor((currentTime - inSalonTime) / 60000); // Elapsed time in minutes
+
+            // Calculate remaining time for the `in_salon` user
+            const totalServiceTime = inSalonUser.Services.reduce(
+                (sum, service) => sum + (service.default_service_time || 0),
+                0
+            );
+            const remainingServiceTime = Math.max(totalServiceTime - elapsedTime, 0);
+
+            // Add the remaining service time to the cumulative wait time
+            cumulativeWaitTime += remainingServiceTime;
+            cumulativeQueuePosition = applength; // Set queue position based on total appointments
+        } else {
+            let lastApp = appointments[applength - 1];
+
+            const totalServiceTime = lastApp?.Services?.length > 0
+                ? lastApp.Services.reduce((sum, service) => sum + (service.default_service_time || 0), 0) // Sum of estimated service times
+                : 20; // If no services are selected, the wait time is zero
 
 
-
+            cumulativeWaitTime = lastApp.estimated_wait_time + totalServiceTime;
+            cumulativeQueuePosition = applength;
+        }
+    }
+    return {
+        totalWaitTime: cumulativeWaitTime, // Total cumulative wait time for the next user
+        numberOfUsersInQueue: cumulativeQueuePosition // Total number of people in the queue
+    };
+};
 
 exports.createPayment = async (req, res) => {
     try {
@@ -198,35 +256,106 @@ exports.handleWebhook = async (req, res) => {
             };
 
             console.log('Cleaned Appointment Data:', cleanedAppointmentData);
+            let barberSession = null;
 
             try {
-                if(cleanedAppointmentData.SlotId){
-                        // Get the selected slot
-                const slot = await db.Slot.findOne({
-                    where: {
-                        id: cleanedAppointmentData.SlotId,
-                        is_booked: false
+
+                // Force an error to test the catch block
+                //throw new Error("Forced error for debugging");
+
+                // save the barber sessionin db when checkin appointment type
+                // Handle barber category logic (for walk-in appointments)
+                const barber = await db.Barber.findByPk(appointmentData.BarberId);
+                if (!barber) {
+                    throw new Error('Barber not found');
+                }
+
+                // Save barber session time if Walk-In category
+                if (barber.category === BarberCategoryENUM.ForWalkIn) {
+                    const today = new Date();
+                    const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0);
+                    const todayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999);
+
+                    // Check if the user already has an active appointment
+                    const activeAppointment = await db.Appointment.findOne({
+                        where: { UserId: userId, status: [AppointmentENUM.Checked_in, AppointmentENUM.In_salon] }
+                    });
+
+                    if (activeAppointment) {
+                        throw new Error("You already have an active appointment. Please complete or cancel it before booking a new one.");
                     }
-                });
 
-                if (!slot) {
-                    throw new Error('Selected slot is not available');
+                    // Retrieve the barber session
+                    const barberSession = await db.BarberSession.findOne({
+                        where: {
+                            BarberId: barber.id,
+                            session_date: { [Op.between]: [todayStart, todayEnd] }
+                        },
+                        attributes: ['id', 'start_time', 'end_time', 'session_date', 'remaining_time']
+                    });
+
+                    if (!barberSession) {
+                        throw new Error('Barber session not found for today');
+                    }
+
+                    // Check for existing appointments for the barber
+                    const activeBarberAppointments = await db.Appointment.findAll({
+                        where: {
+                            BarberId: barber.id,
+                            status: [AppointmentENUM.Checked_in, AppointmentENUM.In_salon]
+                        },
+                    });
+
+                    let remainingTime = calculateRemainingTime(barberSession, activeBarberAppointments);
+                    if (remainingTime < metadataInfo.totalServiceTime) {
+                        throw new Error('Not enough remaining time for this appointment');
+                    }
+
+                    const { totalWaitTime, numberOfUsersInQueue } = await getEstimatedWaitTimeForBarber(barber.id);
+
+                    // Update appointmentData for walk-in
+                    cleanedAppointmentData.status = AppointmentENUM.Checked_in;
+                    cleanedAppointmentData.estimated_wait_time = totalWaitTime;
+                    cleanedAppointmentData.queue_position = numberOfUsersInQueue + 1;
+                    cleanedAppointmentData.check_in_time = new Date();
+
+                    // Update barber session remaining time
+                    await barberSession.update({
+                        remaining_time: remainingTime - metadataInfo.totalServiceTime
+                    });
                 }
 
-                // Verify if enough consecutive slots are available
-                const requiredSlots = await verifyConsecutiveSlotsExp(
-                    slot.BarberSessionId,
-                    slot.slot_date,
-                    slot.start_time,
-                    metadataInfo.totalServiceTime
-                );
+                // Save the slot in db when future appointment type
+                if (cleanedAppointmentData.SlotId) {
+                    // Get the selected slot
+                    const slot = await db.Slot.findOne({
+                        where: {
+                            id: cleanedAppointmentData.SlotId,
+                            is_booked: false
+                        }
+                    });
 
-                if (!requiredSlots) {
-                    throw new Error('Not enough consecutive slots available');
+                    if (!slot) {
+                        throw new Error('Selected slot is not available');
+                    }
+
+                    // Verify if enough consecutive slots are available
+                    const requiredSlots = await verifyConsecutiveSlotsExp(
+                        slot.BarberSessionId,
+                        slot.slot_date,
+                        slot.start_time,
+                        metadataInfo.totalServiceTime
+                    );
+
+                    if (!requiredSlots) {
+                        throw new Error('Not enough consecutive slots available');
+                    }
+                    await markSlotsAsBookedExp(requiredSlots);
+                    cleanedAppointmentData.estimated_wait_time = null;
+                    cleanedAppointmentData.queue_position = null;
                 }
-                await markSlotsAsBookedExp(requiredSlots);
-                }
-            
+
+                // Create appointment and save record in db when i found status "payment_intent.succeeded"
                 const appointment = await Appointment.create(cleanedAppointmentData);
 
                 await Payment.create({
@@ -245,7 +374,7 @@ exports.handleWebhook = async (req, res) => {
                 await validateAndAttachServicesExp(appointment, appointmentData.service_ids, res);
                 const appointmentWithServices = await fetchAppointmentWithServicesExp(appointment.id);
 
-                const barber = await db.Barber.findByPk(appointmentData.BarberId);
+                //const barber = await db.Barber.findByPk(appointmentData.BarberId);
                 const salon = await db.Salon.findByPk(appointmentData.SalonId);
                 const user = await db.USER.findOne({ where: { id: userId }, attributes: ['email'] });
 
@@ -289,6 +418,51 @@ exports.handleWebhook = async (req, res) => {
             } catch (error) {
                 console.error('Error processing payment intent succeeded:', error);
 
+                // Below logic is used when check_in appointment not book some error come, but time booked so here i relesed booked time
+                // Release barber session time if it was booked
+                if (barber?.category === BarberCategoryENUM.ForWalkIn) {
+                    const barberSession = await db.BarberSession.findOne({
+                        where: { BarberId: appointmentData.BarberId },
+                    });
+
+                    if (barberSession) {
+                        // Calculate the total service time to restore
+                        const totalServiceTime = appointmentData.Services.reduce((sum, service) => {
+                            return sum + (service.default_service_time || 0);
+                        }, 0);
+
+                        // Calculate the new remaining time
+                        let updatedRemainingTime = barberSession.remaining_time + totalServiceTime;
+
+                        // Cap remaining time to the barber's total available time
+                        const totalAvailableTime = barberSession.total_time;
+                        if (updatedRemainingTime > totalAvailableTime) {
+                            updatedRemainingTime = totalAvailableTime;
+                        }
+
+                        // Save the new remaining time to the database
+                        await barberSession.update({ remaining_time: updatedRemainingTime });
+                    }
+                }
+
+                // Below logic is used when future appointment not book some error come, but slot booked so here i relesed booked slot.
+                if (cleanedAppointmentData.SlotId) {
+                    // Get the selected slot
+                    const slot = await db.Slot.findOne({
+                        where: {
+                            id: cleanedAppointmentData.SlotId,
+                            is_booked: false
+                        }
+                    });
+
+                    if (!slot) {
+                        throw new Error('Selected slot is not available');
+                    }
+
+                    await markSlotsAsRelesedExp([{ id: cleanedAppointmentData.SlotId }]);
+                }
+
+                // handle return refund payment
                 try {
                     const refund = await stripe.refunds.create({
                         payment_intent: paymentIntent.id,
