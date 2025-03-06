@@ -6,8 +6,8 @@ const { isOnlinePaymentEnabled } = require('../helpers/configurationHelper'); //
 const db = require("../models");
 const { Payment, Appointment, Service } = require('../models'); // Adjust path as needed
 const { PaymentMethodENUM } = require('../config/paymentEnums.config');
-const { INVITE_BOOKING_APPOINTMENT_TEMPLATE_ID} = require("../config/sendGridConfig");
-const { REFUND_PAYMENT} = require("../config/sendGridConfig");
+const { INVITE_BOOKING_APPOINTMENT_TEMPLATE_ID } = require("../config/sendGridConfig");
+const { REFUND_PAYMENT } = require("../config/sendGridConfig");
 const { appCheck } = require('firebase-admin');
 const { sendEmail } = require("../services/emailService");
 const { sendMessageToUser } = require('./socket.controller');
@@ -261,13 +261,13 @@ exports.handleWebhook = async (req, res) => {
         const user = await db.USER.findByPk(appointment.UserId);
 
         const customerData = {
-            email:user.email,
+            email: user.email,
             paymentIntentId: paymentIntentId,
             totalAmount: totalAmount,
             customer_name: `${firstname} ${lastname}`,
-            refundId:refundId,
-            refundReason:refundReason,
-            cancel_time:cancel_time,
+            refundId: refundId,
+            refundReason: refundReason,
+            cancel_time: cancel_time,
             email_subject: 'Refund Payment',
         };
 
@@ -298,7 +298,7 @@ exports.handleWebhook = async (req, res) => {
             const barber = await db.Barber.findByPk(appointmentData.BarberId);
             console.log('Cleaned Appointment Data:', cleanedAppointmentData);
             try {
-                
+
                 // save the barber sessionin db when checkin appointment type
                 // Handle barber category logic (for walk-in appointments)
                 if (!barber) {
@@ -413,16 +413,42 @@ exports.handleWebhook = async (req, res) => {
                 const salon = await db.Salon.findByPk(appointmentData.SalonId);
                 const user = await db.USER.findOne({ where: { id: userId }, attributes: ['email'] });
 
-                let receiptUrl = paymentIntent.charges?.data[0]?.receipt_url;
-                if (!receiptUrl) {
-                    try {
+
+                // let receiptUrl = paymentIntent.charges?.data[0]?.receipt_url;
+                // if (!receiptUrl) {
+                //     try {
+                //         const charge = await stripe.charges.retrieve(paymentIntent.latest_charge);
+                //         receiptUrl = charge.receipt_url;
+                //     } catch (error) {
+                //         console.error('Error retrieving charge:', error);
+                //     }
+                // }
+
+                let receiptUrl;
+                try {
+                    // Log paymentIntent for debugging
+                    console.log('paymentIntent:', JSON.stringify(paymentIntent, null, 2));
+
+                    // Check if paymentIntent exists and has charges
+                    if (!paymentIntent || !paymentIntent.charges) {
+                        throw new Error('Invalid paymentIntent or no charges available');
+                    }
+
+                    // Try to get receipt URL from charges
+                    receiptUrl = paymentIntent.charges?.data[0]?.receipt_url;
+
+                    // Fallback to retrieving charge if receiptUrl is missing
+                    if (!receiptUrl) {
+                        if (!paymentIntent.latest_charge) {
+                            throw new Error('No latest_charge found on paymentIntent');
+                        }
                         const charge = await stripe.charges.retrieve(paymentIntent.latest_charge);
                         receiptUrl = charge.receipt_url;
-                    } catch (error) {
-                        console.error('Error retrieving charge:', error);
                     }
+                } catch (error) {
+                    console.error('Error retrieving receipt URL:', error.message);
+                    // Optionally, set a default or throw an error to the caller
                 }
-
                 if (user) {
                     const emailData = prepareEmailDataExp(
                         appointment,
@@ -492,7 +518,7 @@ exports.handleWebhook = async (req, res) => {
 
                     if (!slot) {
                         throw new Error('Selected slot is not available');
-                    }else{
+                    } else {
                         await markSlotsAsRelesedExp([{ id: cleanedAppointmentData.SlotId }]);
                     }
 
