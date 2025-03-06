@@ -1424,13 +1424,15 @@ exports.customerYearlyStatus = async (req, res) => {
             });
 
             // **New Customers** (Customers created within the month)
-            const newCustomers = await User.count({
-                where: {
-                    RoleId: customerRole.id,
-                    createdAt: { [Op.between]: [monthStart, monthEnd] },
-                    ...whereCondition,
-                }
-            });
+           // **New Customers** (Users whose first appointment is within the month)
+                const newCustomers = await Appointment.count({
+                    where: {
+                        ...whereCondition,
+                        createdAt: { [Op.between]: [monthStart, monthEnd] },
+                    },
+                    distinct: true,
+                    col: 'UserId' // Count unique UserIds
+                });
 
             // **Total Customers** (All customers)
             const totalCustomers = newCustomers + repeatedCustomers.length;
