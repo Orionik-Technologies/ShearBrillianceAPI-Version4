@@ -1,11 +1,13 @@
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const Stripe = require('stripe');
+const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null;
 const { end } = require('pdfkit');
 const sendResponse = require('../helpers/responseHelper'); // Import the helper function
 const { isOnlinePaymentEnabled } = require('../helpers/configurationHelper'); // Import the helper function
 const db = require("../models");
 const { Payment, Appointment, Service } = require('../models'); // Adjust path as needed
 const { PaymentMethodENUM } = require('../config/paymentEnums.config');
-const { INVITE_BOOKING_APPOINTMENT_TEMPLATE_ID } = require("../config/sendGridConfig");
+const { INVITE_BOOKING_APPOINTMENT_TEMPLATE_ID} = require("../config/sendGridConfig");
+const { REFUND_PAYMENT} = require("../config/sendGridConfig");
 const { appCheck } = require('firebase-admin');
 const { sendEmail } = require("../services/emailService");
 const { sendMessageToUser } = require('./socket.controller');
@@ -255,6 +257,21 @@ exports.handleWebhook = async (req, res) => {
                 cancel_time: refund.status === 'succeeded' ? new Date() : appointment.cancel_time,
             });
         }
+
+        const user = await db.USER.findByPk(appointment.UserId);
+
+        const customerData = {
+            email:user.email,
+            paymentIntentId: paymentIntentId,
+            totalAmount: totalAmount,
+            customer_name: `${firstname} ${lastname}`,
+            refundId:refundId,
+            refundReason:refundReason,
+            cancel_time:cancel_time,
+            email_subject: 'Refund Payment',
+        };
+
+        await sendEmail(email, "Refund Payment", REFUND_PAYMENT, customerData);
     };
 
     switch (event.type) {
