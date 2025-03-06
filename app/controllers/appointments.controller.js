@@ -11,11 +11,11 @@ const User = db.USER;
 const UserSalon = db.UserSalon;
 const roles = db.roles;
 const AppointmentService = db.AppointmentService;
-const HaircutDetails =db.HaircutDetails;
-const FavoriteSalon=db.FavoriteSalon;
+const HaircutDetails = db.HaircutDetails;
+const FavoriteSalon = db.FavoriteSalon;
 const BarberSession = db.BarberSession;
 const FcmToken = db.fcmTokens;
-const BarberService=db.BarberService;
+const BarberService = db.BarberService;
 const Payment = db.Payment;
 const { Op, where } = require("sequelize");
 const moment = require("moment");
@@ -31,7 +31,7 @@ const { Sequelize } = require('sequelize');
 const { broadcastBoardUpdates } = require('../controllers/socket.controller');
 const { sendNotificationToUser } = require("../services/notificationService");
 const { INVITE_BOOKING_APPOINTMENT_TEMPLATE_ID } = require("../config/sendGridConfig");
-const {INVITE_CANCEL_APPOINTMENT_TEMPLATE_ID} =require("../config/sendGridConfig");
+const { INVITE_CANCEL_APPOINTMENT_TEMPLATE_ID } = require("../config/sendGridConfig");
 const { isOnlinePaymentEnabled } = require('../helpers/configurationHelper');
 
 
@@ -50,8 +50,8 @@ const getEstimatedWaitTimeForBarber = async (barberId) => {
     const appointments = await Appointment.findAll({
         where: { BarberId: barberId, status: ['checked_in', 'in_salon'] },
         order: [['queue_position', 'ASC']], // Order by queue position to process in order
-        include: [{ 
-            model: Service, 
+        include: [{
+            model: Service,
             attributes: ['id', 'default_service_time'], // Fetch the 'estimated_service_time' from the Service model
             through: { attributes: [] } // Avoid extra attributes from the join table
         }],
@@ -62,33 +62,33 @@ const getEstimatedWaitTimeForBarber = async (barberId) => {
 
     let applength = appointments.length;
 
-    if(applength > 0){
-         // Check if there is only one 'in_salon' user
-         const inSalonUser = appointments.find(a => a.status === 'in_salon');
-         const checkedInUsers = appointments.filter(a => a.status === 'checked_in');
-        
-         if (inSalonUser && checkedInUsers.length === 0) {
+    if (applength > 0) {
+        // Check if there is only one 'in_salon' user
+        const inSalonUser = appointments.find(a => a.status === 'in_salon');
+        const checkedInUsers = appointments.filter(a => a.status === 'checked_in');
+
+        if (inSalonUser && checkedInUsers.length === 0) {
             const currentTime = new Date();
 
-             // Calculate elapsed time since the user was marked 'in_salon'
-             const inSalonTime = new Date(inSalonUser.in_salon_time); // Start time of `in_salon` status
-             const elapsedTime = Math.floor((currentTime - inSalonTime) / 60000); // Elapsed time in minutes
- 
-             // Calculate remaining time for the `in_salon` user
-             const totalServiceTime = inSalonUser.Services.reduce(
-                 (sum, service) => sum + (service.default_service_time || 0),
-                 0
-             );
-             const remainingServiceTime = Math.max(totalServiceTime - elapsedTime, 0);
- 
-             // Add the remaining service time to the cumulative wait time
-             cumulativeWaitTime += remainingServiceTime;
-             cumulativeQueuePosition = applength; // Set queue position based on total appointments
+            // Calculate elapsed time since the user was marked 'in_salon'
+            const inSalonTime = new Date(inSalonUser.in_salon_time); // Start time of `in_salon` status
+            const elapsedTime = Math.floor((currentTime - inSalonTime) / 60000); // Elapsed time in minutes
+
+            // Calculate remaining time for the `in_salon` user
+            const totalServiceTime = inSalonUser.Services.reduce(
+                (sum, service) => sum + (service.default_service_time || 0),
+                0
+            );
+            const remainingServiceTime = Math.max(totalServiceTime - elapsedTime, 0);
+
+            // Add the remaining service time to the cumulative wait time
+            cumulativeWaitTime += remainingServiceTime;
+            cumulativeQueuePosition = applength; // Set queue position based on total appointments
         } else {
             let lastApp = appointments[applength - 1];
 
             const totalServiceTime = lastApp?.Services?.length > 0
-                ? lastApp.Services.reduce((sum, service) => sum + (service.default_service_time  || 0), 0) // Sum of estimated service times
+                ? lastApp.Services.reduce((sum, service) => sum + (service.default_service_time || 0), 0) // Sum of estimated service times
                 : 20; // If no services are selected, the wait time is zero
 
 
@@ -96,7 +96,7 @@ const getEstimatedWaitTimeForBarber = async (barberId) => {
             cumulativeQueuePosition = applength;
         }
     }
-    return { 
+    return {
         totalWaitTime: cumulativeWaitTime, // Total cumulative wait time for the next user
         numberOfUsersInQueue: cumulativeQueuePosition // Total number of people in the queue
     };
@@ -107,8 +107,8 @@ const recalculateWaitTimesAndQueuePositionsForBarber = async (barberId) => {
     const appointments = await Appointment.findAll({
         where: { BarberId: barberId, status: ['checked_in', 'in_salon'] },
         order: [['queue_position', 'ASC']], // Order by queue position to process in order
-        include: [{ 
-            model: Service, 
+        include: [{
+            model: Service,
             attributes: ['id', 'default_service_time'], // Fetch the 'estimated_service_time' from the Service model
             through: { attributes: [] } // Avoid extra attributes from the join table
         }],
@@ -116,7 +116,7 @@ const recalculateWaitTimesAndQueuePositionsForBarber = async (barberId) => {
 
     let cumulativeQueuePosition = 0; // Tracks cumulative queue position
     let cumulativeWaitTime = 0; // Tracks cumulative wait time
-    let firstUserPendingTime  = 0;
+    let firstUserPendingTime = 0;
 
     // Process 'in_salon' user first (if any)
     const inSalonAppointments = appointments.filter(a => a.status === 'in_salon');
@@ -125,22 +125,22 @@ const recalculateWaitTimesAndQueuePositionsForBarber = async (barberId) => {
         inSalonUser.queue_position = 1;
         inSalonUser.estimated_wait_time = 0; // First user has no wait time
         const inSalonServiceTime = inSalonUser.Services?.reduce((sum, service) => sum + (service.default_service_time || 0), 0);
-        
+
         // Update cumulative values based on the in_salon user
         cumulativeQueuePosition += inSalonUser.number_of_people;
         cumulativeWaitTime += inSalonUser.number_of_people * inSalonServiceTime;
 
         const inSalonTime = new Date(inSalonUser.in_salon_time); // Convert to a Date object
         const now = new Date(); // Get the current date and time
-            
+
         // Calculate the difference in milliseconds
         const differenceInMs = now - inSalonTime;
-            
+
         // Convert the difference to minutes
         const differenceInMinutes = Math.floor(differenceInMs / 60000);
 
         firstUserPendingTime = inSalonServiceTime - differenceInMinutes;
-        
+
         await inSalonUser.save();
     }
 
@@ -151,35 +151,35 @@ const recalculateWaitTimesAndQueuePositionsForBarber = async (barberId) => {
 
         const appointment = checkedInAppointments[index];
 
-        if(index == 0){
+        if (index == 0) {
             if (inSalonAppointments.length > 0) {
                 cumulativeQueuePosition += 1; // Increment queue position by 1 for each new user
                 appointment.queue_position = cumulativeQueuePosition;
                 appointment.estimated_wait_time = firstUserPendingTime;
                 await appointment.save(); // Save updated appointment details
             }
-            else{
+            else {
                 cumulativeQueuePosition += 1; // Increment queue position by 1 for each new user
                 appointment.queue_position = cumulativeQueuePosition;
                 appointment.estimated_wait_time = firstUserPendingTime;
                 await appointment.save(); // Save updated appointment details
             }
         }
-        else{
-            let lastAppointment = checkedInAppointments[index-1];
+        else {
+            let lastAppointment = checkedInAppointments[index - 1];
 
             const totalServiceTime = lastAppointment?.Services?.length > 0
-            ? lastAppointment.Services.reduce((sum, service) => sum + (service.default_service_time  || 0), 0) // Sum of estimated service times
-            : 20; // If no services are selected, the wait time is zero
-    
+                ? lastAppointment.Services.reduce((sum, service) => sum + (service.default_service_time || 0), 0) // Sum of estimated service times
+                : 20; // If no services are selected, the wait time is zero
+
             cumulativeQueuePosition += 1; // Increment queue position by 1 for each new user
             appointment.queue_position = cumulativeQueuePosition;
             appointment.estimated_wait_time = lastAppointment.estimated_wait_time + totalServiceTime;
-        
+
             console.log(`Processing index ${index}, appointment ID: ${appointment.id}`);
-        
+
             await appointment.save(); // Save updated appointment details
-        } 
+        }
     }
 };
 
@@ -194,7 +194,7 @@ function calculateRemainingTime(barberSession, activeAppointments) {
     if (activeAppointments.length > 0) {
         return barberSession.remaining_time;
     }
-    
+
     const now = new Date();
     const today = new Date();
     const endTimeString = `${today.getFullYear()}-${today.getMonth() + 1}-${today.getDate()} ${barberSession.end_time}`;
@@ -225,6 +225,18 @@ async function markSlotsAsBooked(slots) {
 }
 
 exports.markSlotsAsBookedExp = markSlotsAsBooked;
+
+
+async function markSlotsAsRelesed(slots) {
+    for (const slot of slots) {
+        await db.Slot.update(
+            { is_booked: false },
+            { where: { id: slot.id } }
+        );
+    }
+}
+
+exports.markSlotsAsRelesedExp = markSlotsAsRelesed;
 
 
 // Helper function to verify consecutive available slots
@@ -262,11 +274,10 @@ async function sendAppointmentNotifications(appointment, name, mobile_number, us
     const salon = await db.Salon.findOne({ where: { id: salon_id } });
     const salonName = salon ? salon.name : 'the selected salon';
 
-    const message = `Dear ${name}, your appointment has been successfully booked at ${salonName}. ${
-        appointment.estimated_wait_time 
+    const message = `Dear ${name}, your appointment has been successfully booked at ${salonName}. ${appointment.estimated_wait_time
             ? `The estimated wait time is ${appointment.estimated_wait_time} minutes.`
             : `Your appointment is scheduled for ${appointment.appointment_date} at ${appointment.appointment_start_time}.`
-    } We look forward to serving you.`;
+        } We look forward to serving you.`;
 
     try {
         await sendSMS(mobile_number, message);
@@ -291,7 +302,7 @@ exports.sendAppointmentNotificationsExp = sendAppointmentNotifications;
 
 
 // Helper function to prepare email data when appointment create for walk_In and Appointment
-const prepareEmailData = (appointment, barber, salon, services,  validatedTip, tax, totalAmount, receiptUrl) => {
+const prepareEmailData = (appointment, barber, salon, services, validatedTip, tax, totalAmount, receiptUrl) => {
     const formatTo12Hour = (time) => {
         const [hours, minutes, seconds] = time.split(":").map(Number);
         const date = new Date(1970, 0, 1, hours, minutes, seconds); // Create a valid Date object
@@ -310,7 +321,7 @@ const prepareEmailData = (appointment, barber, salon, services,  validatedTip, t
     const salonName = salon ? salon.name : "the selected salon";
     const salonAddress = salon ? salon.address : "the selected salon";
     const isWalkIn = barber.category === BarberCategoryENUM.ForWalkIn;
-    
+
 
     if (isWalkIn) {
         return {
@@ -353,7 +364,7 @@ const prepareEmailData = (appointment, barber, salon, services,  validatedTip, t
             tip: validatedTip,
             tax: tax,
             total_amount: totalAmount,
-            payment_mode: appointment.paymentMode || "Pay_Online", 
+            payment_mode: appointment.paymentMode || "Pay_Online",
             payment_status: appointment.paymentStatus,
             email_subject: "Appointment Confirmation",
             cancel_url: `${process.env.FRONTEND_URL}/appointment_confirmation/${appointment.id}`,
@@ -416,9 +427,6 @@ async function handleBarberCategoryLogic(barber, user_id, totalServiceTime, appo
             appointmentData.queue_position = numberOfUsersInQueue + 1;
             appointmentData.check_in_time = new Date();
 
-
-            appointmentData.estimated_wait_time = null;
-            appointmentData.queue_position = null;
             // Update barber session remaining time
             // await barberSession.update({ 
             //     remaining_time: remainingTime - totalServiceTime 
@@ -431,7 +439,7 @@ async function handleBarberCategoryLogic(barber, user_id, totalServiceTime, appo
 
             // Get the selected slot
             const slot = await db.Slot.findOne({
-                where: { 
+                where: {
                     id: slot_id,
                     is_booked: false
                 }
@@ -447,9 +455,9 @@ async function handleBarberCategoryLogic(barber, user_id, totalServiceTime, appo
 
             // Verify if enough consecutive slots are available
             const requiredSlots = await verifyConsecutiveSlots(
-                slot.BarberSessionId, 
-                slot.slot_date, 
-                slot.start_time, 
+                slot.BarberSessionId,
+                slot.slot_date,
+                slot.start_time,
                 totalServiceTime
             );
 
@@ -464,6 +472,7 @@ async function handleBarberCategoryLogic(barber, user_id, totalServiceTime, appo
             appointmentData.appointment_start_time = slot.start_time;
             appointmentData.appointment_end_time = endTime.toTimeString().split(' ')[0];
 
+            
             // Mark slots as booked
             //await markSlotsAsBooked(requiredSlots);
         }
@@ -572,7 +581,7 @@ exports.create = async (req, res) => {
         if (!onlinePaymentEnabled || !Object.values(PaymentMethodENUM).includes(payment_mode)) {
             payment_mode = PaymentMethodENUM.Pay_In_Person;
         }
-    
+
         // Get barber details including category
         const barber = await db.Barber.findByPk(barber_id);
         if (!barber) {
@@ -617,8 +626,8 @@ exports.create = async (req, res) => {
         const totalServiceCost = services.reduce((sum, service) => {
             const frequency = serviceFrequency[service.id] || 0;
             // Use barber-specific price if available, otherwise fall back to min_price
-            const servicePrice = barberServicePriceMap[service.id] !== undefined 
-                ? barberServicePriceMap[service.id] 
+            const servicePrice = barberServicePriceMap[service.id] !== undefined
+                ? barberServicePriceMap[service.id]
                 : Number(service.min_price);
             return sum + (servicePrice * frequency);
         }, 0);
@@ -643,7 +652,7 @@ exports.create = async (req, res) => {
         // Call the new function to handle barber category logic
         appointmentData = await handleBarberCategoryLogic(barber, user_id, totalServiceTime, appointmentData, slot_id);
 
-        if (payment_mode === PaymentMethodENUM.Pay_In_Person  || !onlinePaymentEnabled) {
+        if (payment_mode === PaymentMethodENUM.Pay_In_Person || !onlinePaymentEnabled) {
             // For pay in person, create appointment with pending status
             appointmentData = {
                 ...appointmentData,
@@ -664,7 +673,7 @@ exports.create = async (req, res) => {
                 paymentStatus: 'Pending',
                 paymentMethod: PaymentMethodENUM.Pay_In_Person,
             });
-            
+
             // Ensure service_ids contains only valid and selected services
             // Validate and attach services
             const validServices = await validateAndAttachServices(appointment, service_ids, res);
@@ -674,7 +683,7 @@ exports.create = async (req, res) => {
             // Fetch appointment with services
             const appointmentWithServices = await fetchAppointmentWithServices(appointment.id);
 
-            
+
 
             if (appointmentWithServices) {
                 const salon = await db.Salon.findByPk(salon_id);
@@ -686,35 +695,35 @@ exports.create = async (req, res) => {
                     validatedTip,
                     tax,
                     totalAmount
-                );  
+                );
 
                 // Add this before sending the confirmation email
-                const user = await db.USER.findOne({ where: {id : user_id }, attributes: ['email'] });
+                const user = await db.USER.findOne({ where: { id: user_id }, attributes: ['email'] });
                 if (!user) {
                     return sendResponse(res, false, 'User not found', null, 404);
                 }
-                
-                const email = user.email; 
+
+                const email = user.email;
 
                 // Send confirmation email
-                await sendEmail(email,"Your Appointment Book Successfully",INVITE_BOOKING_APPOINTMENT_TEMPLATE_ID, emailData );
+                await sendEmail(email, "Your Appointment Book Successfully", INVITE_BOOKING_APPOINTMENT_TEMPLATE_ID, emailData);
             }
 
-            if(barber.category === BarberCategoryENUM.ForWalkIn) {
+            if (barber.category === BarberCategoryENUM.ForWalkIn) {
                 const updatedAppointments = await getAppointmentsByRole(false);
-                if(updatedAppointments) broadcastBoardUpdates(updatedAppointments);
+                if (updatedAppointments) broadcastBoardUpdates(updatedAppointments);
             }
 
             // Send notifications
             await sendAppointmentNotifications(appointment, name, mobile_number, user_id, salon_id);
 
-            
+
             return sendResponse(res, true, 'Appointment created successfully', appointmentWithServices, 201);
 
         }
     } catch (error) {
-    console.error("Error creating appointment:", error);
-    return sendResponse(res, false, error.message || 'Internal Server Error', null, 500);
+        console.error("Error creating appointment:", error);
+        return sendResponse(res, false, error.message || 'Internal Server Error', null, 500);
     }
 };
 
@@ -756,7 +765,7 @@ async function releaseBookedSlots(appointment) {
         });
 
         // Release all slots
-        await Promise.all(slots.map(slot => 
+        await Promise.all(slots.map(slot =>
             slot.update({ is_booked: false })
         ));
 
@@ -766,223 +775,232 @@ async function releaseBookedSlots(appointment) {
         throw error; // Throw the error to be handled by the calling function
     }
 }
-
+exports.releaseBookedSlotsExp = releaseBookedSlots;
 
 exports.updateStatus = async (req, res) => {
     try {
-      const { status } = req.body;
-  
-      // Find the appointment with the associated Barber
-      const appointment = await Appointment.findByPk(req.params.id, {
-        include: [
-          {
-            model: Barber,
-            as: 'Barber', // Alias for the association
-          },
-          {
-            model: Service,
-            attributes: ['id', 'default_service_time'], // Ensure service time is fetched
-            through: { attributes: [] },
-        },
-        ],
-      });
-  
+        const { status } = req.body;
 
-      if (!appointment) {
-        return sendResponse(res, false, "Appointment not found", null, 404);
-      }
+        // Find the appointment with the associated Barber
+        const appointment = await Appointment.findByPk(req.params.id, {
+            include: [
+                {
+                    model: Barber,
+                    as: 'Barber', // Alias for the association
+                },
+                {
+                    model: Service,
+                    attributes: ['id', 'default_service_time'], // Ensure service time is fetched
+                    through: { attributes: [] },
+                },
+            ],
+        });
 
-      if (appointment) {
-        // Manually fetch associated services
-        const appointmentServices = await AppointmentService.findAll({
-            where: {
-                AppointmentId: appointment.id
+
+        if (!appointment) {
+            return sendResponse(res, false, "Appointment not found", null, 404);
+        }
+
+        if (appointment) {
+            // Manually fetch associated services
+            const appointmentServices = await AppointmentService.findAll({
+                where: {
+                    AppointmentId: appointment.id
+                }
+            });
+            const serviceIds = appointmentServices.map(as => as.ServiceId);
+            // Get all service IDs
+            const servicesMap = await Service.findAll({
+                where: {
+                    id: serviceIds
+                },
+                attributes: ['id', 'name', 'min_price', 'max_price', 'default_service_time']
+            }).then(services => {
+                // Create a map of services by ID for quick lookup
+                return services.reduce((map, service) => {
+                    map[service.id] = service;
+                    return map;
+                }, {});
+            });
+
+            // Map back to maintain order and duplicates
+            const services = appointmentServices.map(as => servicesMap[as.ServiceId]);
+
+            // Add services to appointment object
+            appointment.dataValues.Services = services;
+        }
+
+        // Get the barber to check category
+        const barber = await db.Barber.findByPk(appointment.BarberId);
+
+        // Check if the salon is closed, if so cancel appointments
+        const salon = await Salon.findByPk(appointment.SalonId);
+        if (salon && salon.isClosed) {
+            const cancellationResult = await cancelCheckedInOrInSalonAppointments(appointment.SalonId);
+            if (!cancellationResult) {
+                return sendResponse(res, false, "Error canceling appointments", null, 500);
             }
-        });
-        const serviceIds = appointmentServices.map(as => as.ServiceId);
-        // Get all service IDs
-        const servicesMap = await Service.findAll({
-            where: {
-                id: serviceIds
-            },
-            attributes: ['id', 'name', 'min_price', 'max_price', 'default_service_time']
-        }).then(services => {
-            // Create a map of services by ID for quick lookup
-            return services.reduce((map, service) => {
-                map[service.id] = service;
-                return map;
-            }, {});
-        });
-
-        // Map back to maintain order and duplicates
-        const services = appointmentServices.map(as => servicesMap[as.ServiceId]);
-    
-        // Add services to appointment object
-        appointment.dataValues.Services = services;
-    }
-
-       // Get the barber to check category
-       const barber = await db.Barber.findByPk(appointment.BarberId);
-  
-      // Check if the salon is closed, if so cancel appointments
-      const salon = await Salon.findByPk(appointment.SalonId);
-      if (salon && salon.isClosed) {
-        const cancellationResult = await cancelCheckedInOrInSalonAppointments(appointment.SalonId);
-        if (!cancellationResult) {
-          return sendResponse(res, false, "Error canceling appointments", null, 500);
-        }
-        console.log(`Appointments were canceled for Salon ID ${appointment.SalonId}`);
-      }
-  
-      // Define valid status transitions
-      const validTransitions = {
-        checked_in: ['in_salon', 'canceled'],
-        appointment: ['canceled','completed'],
-        in_salon: ['completed'],
-        completed: [], // No transitions allowed
-        canceled: [], // No transitions allowed
-      };
-  
-      // Check if the new status is valid for the current status
-      if (!validTransitions[appointment.status]?.includes(status)) {
-        return sendResponse(
-          res,
-          false,
-          `Sorry..!  You can't go back `,
-          null,
-          400
-        );
-      }
-  
-      // Check if the Barber is already serving another appointment in the Salon
-      if (status === 'in_salon') {
-        const activeAppointment = await Appointment.findOne({
-          where: {
-            BarberId: appointment.BarberId,
-            SalonId: appointment.SalonId,
-            status: 'in_salon',
-          },
-        });
-  
-        if (activeAppointment) {
-          return sendResponse(
-            res,
-            false,
-            "Sorry, this Barber is already serving another appointment.",
-            null,
-            400
-          );
-        }
-  
-        // Update status and perform corresponding actions
-        appointment.in_salon_time = new Date();
-        appointment.queue_position = 1; // Set priority queue position
-        appointment.estimated_wait_time = 0; // Immediate service
-      } else if (status === 'completed') {
-        appointment.complete_time = status === 'completed' ? new Date() : null;
-        appointment.estimated_wait_time = 0;
-        appointment.queue_position = 0;
-
-          // For appointment-based barbers (category 1), mark slots as completed
-          if (barber.category === BarberCategoryENUM.ForAppointment) {
-            // You might want to keep the slots marked as booked for record-keeping
-            // or implement a new status for completed appointments' slots
+            console.log(`Appointments were canceled for Salon ID ${appointment.SalonId}`);
         }
 
-        // Fetch the payment record for the appointment
-        const payment = await db.Payment.findOne({ where: { appointmentId: appointment.id } });
+        // Define valid status transitions
+        const validTransitions = {
+            checked_in: ['in_salon', 'canceled'],
+            appointment: ['canceled', 'completed'],
+            in_salon: ['completed'],
+            completed: [], // No transitions allowed
+            canceled: [], // No transitions allowed
+        };
 
-        // If payment exists and is Pay_In_Person, update status to Success
-        if (payment && appointment.paymentMode === PaymentMethodENUM.Pay_In_Person) {
-            if (payment.paymentStatus !== 'Success') { // Avoid redundant updates
-            await payment.update({
-                paymentStatus: 'Success',
-                paymentDate: new Date(), // Optional: Record the date of payment
+        // Check if the new status is valid for the current status
+        if (!validTransitions[appointment.status]?.includes(status)) {
+            return sendResponse(
+                res,
+                false,
+                `Sorry..!  You can't go back `,
+                null,
+                400
+            );
+        }
+
+        // Check if the Barber is already serving another appointment in the Salon
+        if (status === 'in_salon') {
+            const activeAppointment = await Appointment.findOne({
+                where: {
+                    BarberId: appointment.BarberId,
+                    SalonId: appointment.SalonId,
+                    status: 'in_salon',
+                },
             });
-            await appointment.update({
-                paymentStatus: 'Success', // Sync appointment's paymentStatus with Payment model
-            });
+
+            if (activeAppointment) {
+                return sendResponse(
+                    res,
+                    false,
+                    "Sorry, this Barber is already serving another appointment.",
+                    null,
+                    400
+                );
             }
-        }
-        
 
-        const fcmTokens = await FcmToken.findAll({ where: { UserId: appointment.UserId } });
-        if (fcmTokens.length > 0) {
-          const notificationTitle = "Appointment completed";
-          const notificationBody = `Your appointment has been completed. Thank you for choosing our service!`;
-    
-          for (const token of fcmTokens) {
-            await sendNotificationToUser(token.token, notificationTitle, notificationBody);
-          }
-        }
+            // Update status and perform corresponding actions
+            appointment.in_salon_time = new Date();
+            appointment.queue_position = 1; // Set priority queue position
+            appointment.estimated_wait_time = 0; // Immediate service
+        } else if (status === 'completed') {
+            appointment.complete_time = status === 'completed' ? new Date() : null;
+            appointment.estimated_wait_time = 0;
+            appointment.queue_position = 0;
 
-      } else if ( status === 'canceled'){
-        const canceledWaitTime = appointment.estimated_wait_time; // Initialize canceledWaitTime
-        appointment.cancel_time = new Date();
- 
-        appointment.estimated_wait_time = 0;
-        appointment.queue_position = 0;
+            // For appointment-based barbers (category 1), mark slots as completed
+            if (barber.category === BarberCategoryENUM.ForAppointment) {
+                // You might want to keep the slots marked as booked for record-keeping
+                // or implement a new status for completed appointments' slots
+            }
 
-        // Handle slot release based on barber category
-        if (barber.category === BarberCategoryENUM.ForAppointment) {
-            await releaseBookedSlots(appointment);
-        } else if (barber.category === BarberCategoryENUM.ForWalkIn) {
+            // Fetch the payment record for the appointment
+            const payment = await db.Payment.findOne({ where: { appointmentId: appointment.id } });
 
-          // Fetch the barber session
-            const barberSession = await BarberSession.findOne({
-                where: { BarberId: appointment.BarberId },
-            });
+            // If payment exists and is Pay_In_Person, update status to Success
+            if (payment && appointment.paymentMode === PaymentMethodENUM.Pay_In_Person) {
+                if (payment.paymentStatus !== 'Success') { // Avoid redundant updates
+                    await payment.update({
+                        paymentStatus: 'Success',
+                        paymentDate: new Date(), // Optional: Record the date of payment
+                    });
+                    await appointment.update({
+                        paymentStatus: 'Success', // Sync appointment's paymentStatus with Payment model
+                    });
+                }
+            }
 
-            if (barberSession) {
-                const totalServiceTime = appointment.Services.reduce((sum, service) => {
-                    return sum + (service.default_service_time || 0);
-                }, 0);
 
-                let updatedRemainingTime = barberSession.remaining_time + totalServiceTime;
-                const totalAvailableTime = barberSession.total_time;
-                
-                if (updatedRemainingTime > totalAvailableTime) {
-                    updatedRemainingTime = totalAvailableTime;
+            const fcmTokens = await FcmToken.findAll({ where: { UserId: appointment.UserId } });
+            if (fcmTokens.length > 0) {
+                const notificationTitle = "Appointment completed";
+                const notificationBody = `Your appointment has been completed. Thank you for choosing our service!`;
+
+                for (const token of fcmTokens) {
+                    await sendNotificationToUser(token.token, notificationTitle, notificationBody);
+                }
+            }
+
+        } else if (status === 'canceled') {
+            const canceledWaitTime = appointment.estimated_wait_time; // Initialize canceledWaitTime
+            appointment.cancel_time = new Date();
+
+            appointment.estimated_wait_time = 0;
+            appointment.queue_position = 0;
+
+            // Handle slot release based on barber category
+            if (barber.category === BarberCategoryENUM.ForAppointment) {
+                await releaseBookedSlots(appointment);
+            } else if (barber.category === BarberCategoryENUM.ForWalkIn) {
+
+                // Fetch the barber session
+                const barberSession = await BarberSession.findOne({
+                    where: { BarberId: appointment.BarberId },
+                });
+
+                if (barberSession) {
+                    const totalServiceTime = appointment.Services.reduce((sum, service) => {
+                        return sum + (service.default_service_time || 0);
+                    }, 0);
+
+                    let updatedRemainingTime = barberSession.remaining_time + totalServiceTime;
+                    const totalAvailableTime = barberSession.total_time;
+
+                    if (updatedRemainingTime > totalAvailableTime) {
+                        updatedRemainingTime = totalAvailableTime;
+                    }
+
+                    await barberSession.update({ remaining_time: updatedRemainingTime });
                 }
 
-                await barberSession.update({ remaining_time: updatedRemainingTime });
             }
 
-        }
+            const payment = await db.Payment.findOne({ where: { appointmentId: appointment.id } });
 
-        const payment = await db.Payment.findOne({ where: { appointmentId: appointment.id } });
+            // Initiate refund if payment mode is Pay_Online
+            if (payment) {
+                if (appointment.paymentMode === PaymentMethodENUM.Pay_Online && appointment.stripePaymentIntentId) {
+                    if (payment.paymentStatus === 'Success') {
+                        try {
+                            const refund = await stripe.refunds.create({
+                                payment_intent: appointment.stripePaymentIntentId,
+                                reason: 'requested_by_customer',
+                                metadata: {
+                                    appointmentId: appointment.id.toString(),
+                                    userId: appointment.UserId.toString(),
+                                },
+                            });
 
-        // Initiate refund if payment mode is Pay_Online
-        if (payment) {
-            if (appointment.paymentMode === PaymentMethodENUM.Pay_Online && appointment.stripePaymentIntentId) {
-                if (payment.paymentStatus === 'Success') {
-                    try {
-                        const refund = await stripe.refunds.create({
-                            payment_intent: appointment.stripePaymentIntentId,
-                            reason: 'requested_by_customer',
-                            metadata: {
-                                appointmentId: appointment.id.toString(),
-                                userId: appointment.UserId.toString(),
-                            },
-                        });
+                            // Update Payment and Appointment to "Processing" during refund
+                            await payment.update({
+                                paymentStatus: 'Processing',
+                                refundId: refund.id,
+                                refundReason: 'requested_by_customer',
+                            });
+                            await appointment.update({
+                                paymentStatus: 'Processing',
+                            });
 
-                        // Update Payment and Appointment to "Processing" during refund
+                            console.log(`Refund initiated for Payment Intent ${appointment.stripePaymentIntentId}: Refund ID ${refund.id}`);
+                        } catch (refundError) {
+                            console.error("Error initiating refund:", refundError);
+                            return sendResponse(res, false, "Failed to initiate refund", null, 500);
+                        }
+                    } else if (payment.paymentStatus === 'Pending') {
+                        // If payment was never completed, mark as "Canceled"
                         await payment.update({
-                            paymentStatus: 'Processing',
-                            refundId: refund.id,
-                            refundReason: 'requested_by_customer',
+                            paymentStatus: 'Canceled',
                         });
                         await appointment.update({
-                            paymentStatus: 'Processing',
+                            paymentStatus: 'Canceled',
                         });
-
-                        console.log(`Refund initiated for Payment Intent ${appointment.stripePaymentIntentId}: Refund ID ${refund.id}`);
-                    } catch (refundError) {
-                        console.error("Error initiating refund:", refundError);
-                        return sendResponse(res, false, "Failed to initiate refund", null, 500);
                     }
-                } else if (payment.paymentStatus === 'Pending') {
-                    // If payment was never completed, mark as "Canceled"
+                } else {
+                    // For Pay_In_Person or no Stripe payment, set to "Canceled"
                     await payment.update({
                         paymentStatus: 'Canceled',
                     });
@@ -990,18 +1008,81 @@ exports.updateStatus = async (req, res) => {
                         paymentStatus: 'Canceled',
                     });
                 }
-            } else {
-                // For Pay_In_Person or no Stripe payment, set to "Canceled"
-                await payment.update({
-                    paymentStatus: 'Canceled',
-                });
-                await appointment.update({
-                    paymentStatus: 'Canceled',
-                });
+            }
+
+            // Send cancellation notification
+            const fcmTokens = await FcmToken.findAll({ where: { UserId: appointment.UserId } });
+            if (fcmTokens.length > 0) {
+                const notificationTitle = "Appointment canceled";
+                const notificationBody = `Your appointment has been canceled. If this was a mistake, please rebook your appointment`;
+
+                for (const token of fcmTokens) {
+                    await sendNotificationToUser(token.token, notificationTitle, notificationBody);
+                }
             }
         }
 
-        // Send cancellation notification
+
+        appointment.status = status;
+        await appointment.save();
+
+        if (status === 'completed' || status === 'in_salon' || status === 'canceled') {
+            // Recalculate wait times and queue positions
+            await recalculateWaitTimesAndQueuePositionsForBarber(appointment.BarberId);
+
+            // Fetch updated appointments and broadcast the updates
+            const updatedAppointments = await getAppointmentsByRole(false);
+            if (updatedAppointments)
+                broadcastBoardUpdates(updatedAppointments);
+        }
+
+
+
+        // Notify the user about the updated wait time or status
+        sendMessageToUser(appointment.UserId, 'waitTimeUpdate', appointment);
+
+        const appointments = await Appointment.findAll({
+            where: {
+                BarberId: appointment.BarberId,
+                status: ['checked_in', 'in_salon'],
+            },
+            include: [
+                {
+                    model: Barber,
+                    as: 'Barber', // Include associated Barber
+                },
+            ],
+        });
+
+        appointments.forEach((element) => {
+            // Notify users about the updated wait time or status
+            sendMessageToUser(element.UserId, 'waitTimeUpdate', element);
+        });
+
+
+
+        return sendResponse(res, true, "Appointment status updated", appointment, 200);
+    } catch (error) {
+        return sendResponse(res, false, error.message, null, 500);
+    }
+};
+
+/* Appointment update end */
+
+// Cancel an appointment
+async function handleAppointmentCancellation(appointment, res) {
+    try {
+        // Update appointment status to canceled
+        appointment.status = 'canceled';
+        appointment.cancel_time = new Date();
+        appointment.estimated_wait_time = 0;
+        appointment.queue_position = 0;
+        await appointment.save();
+
+        // Recalculate wait times and queue positions for the barber
+        await recalculateWaitTimesAndQueuePositionsForBarber(appointment.BarberId);
+
+        // Send FCM notifications
         const fcmTokens = await FcmToken.findAll({ where: { UserId: appointment.UserId } });
         if (fcmTokens.length > 0) {
             const notificationTitle = "Appointment canceled";
@@ -1011,56 +1092,38 @@ exports.updateStatus = async (req, res) => {
                 await sendNotificationToUser(token.token, notificationTitle, notificationBody);
             }
         }
-    }
 
-        
-      appointment.status = status;
-      await appointment.save();
-  
-      if (status === 'completed' || status === 'in_salon' || status === 'canceled'){
-        // Recalculate wait times and queue positions
-        await recalculateWaitTimesAndQueuePositionsForBarber(appointment.BarberId);
-       
-        // Fetch updated appointments and broadcast the updates
-       const updatedAppointments = await getAppointmentsByRole(false);
-       if(updatedAppointments)
-       broadcastBoardUpdates(updatedAppointments);
-      }
+        // Fetch updated appointments and broadcast updates
+        const updatedAppointments = await getAppointmentsByRole(false);
+        if (updatedAppointments) broadcastBoardUpdates(updatedAppointments);
 
+        // Send email notification
+        let emailData;
+        if (appointment.User) {
+            emailData = {
+                customer_name: appointment.name,
+                barber_name: appointment.Barber.name,
+                appointment_date: appointment.appointment_date,
+                appointment_start_time: `${appointment.appointment_start_time}`,
+                salon_name: salonName,
+                location: salonAddress,
+                currentYear: new Date().getFullYear(),
+                reschedule_url: `${process.env.FRONTEND_URL}/select_salon`,
+                email_subject: "Your Appointment Has Been Canceled"
+            };
+            console.log("Email data:", emailData);
 
-  
-      // Notify the user about the updated wait time or status
-      sendMessageToUser(appointment.UserId, 'waitTimeUpdate', appointment);
-  
-      const appointments = await Appointment.findAll({
-        where: {
-          BarberId: appointment.BarberId,
-          status: ['checked_in', 'in_salon'],
-        },
-        include: [
-          {
-            model: Barber,
-            as: 'Barber', // Include associated Barber
-          },
-        ],
-      });
-  
-      appointments.forEach((element) => {
-        // Notify users about the updated wait time or status
-        sendMessageToUser(element.UserId, 'waitTimeUpdate', element);
-      });
+            await sendEmail(appointment.User.email, "Appointment Cancellation", INVITE_CANCEL_APPOINTMENT_TEMPLATE_ID, emailData);
+            console.log("Email sent successfully.", appointment.User.email);
+        }
 
-   
-  
-      return sendResponse(res, true, "Appointment status updated", appointment, 200);
+        return sendResponse(res, true, "Appointment canceled successfully", null, 200);
     } catch (error) {
-      return sendResponse(res, false, error.message, null, 500);
+        console.error("Error handling appointment cancellation:", error);
+        return sendResponse(res, false, "Failed to cancel appointment", null, 500);
     }
-};
-  
-/* Appointment update end */
+}
 
-// Cancel an appointment
 exports.cancel = async (req, res) => {
     try {
         // Fetch the appointment by its ID with related services
@@ -1074,7 +1137,7 @@ exports.cancel = async (req, res) => {
             ],
         });
 
-        const user = await db.USER.findByPk(appointment.UserId );
+        const user = await db.USER.findByPk(appointment.UserId);
 
         if (!appointment) {
             return sendResponse(res, false, "Appointment not found", null, 404);
@@ -1100,7 +1163,7 @@ exports.cancel = async (req, res) => {
             if (!slotsReleased) {
                 return sendResponse(res, false, "Error releasing appointment slots", null, 500);
             }
-        } 
+        }
         // For walk-in barbers (category 2), handle remaining time
         else if (barber.category === BarberCategoryENUM.ForWalkIn) {
             const barberSession = await BarberSession.findOne({
@@ -1154,6 +1217,15 @@ exports.cancel = async (req, res) => {
 
                         console.log(`Refund initiated for Payment Intent ${appointment.stripePaymentIntentId}: Refund ID ${refund.id}`);
                     } catch (refundError) {
+                        if (refundError.code === 'charge_already_refunded') {
+                            
+                            // Update Payment and Appointment to "Processing" during refund
+                            await payment.update({
+                                paymentStatus: 'Refunded',
+                            });
+                            await handleAppointmentCancellation(appointment, res);
+                            
+                        }
                         console.error("Error initiating refund:", refundError);
                         return sendResponse(res, false, "Failed to initiate refund", null, 500);
                     }
@@ -1189,20 +1261,20 @@ exports.cancel = async (req, res) => {
 
         const fcmTokens = await FcmToken.findAll({ where: { UserId: appointment.UserId } });
         if (fcmTokens.length > 0) {
-          const notificationTitle = "Appointment canceled";
-          const notificationBody = `Your appointment has been canceled. If this was a mistake, please rebook your appointment`;
-    
-          for (const token of fcmTokens) {
-            await sendNotificationToUser(token.token, notificationTitle, notificationBody);
-          }
+            const notificationTitle = "Appointment canceled";
+            const notificationBody = `Your appointment has been canceled. If this was a mistake, please rebook your appointment`;
+
+            for (const token of fcmTokens) {
+                await sendNotificationToUser(token.token, notificationTitle, notificationBody);
+            }
         }
 
         // Fetch updated appointments and broadcast the updates
         const updatedAppointments = await getAppointmentsByRole(false);
-        if(updatedAppointments)
-        broadcastBoardUpdates(updatedAppointments);
+        if (updatedAppointments)
+            broadcastBoardUpdates(updatedAppointments);
 
-     
+
         // // Send email notification
         let emailData;
         if (user) {
@@ -1391,7 +1463,7 @@ exports.findAll = async (req, res) => {
                     model: User,
                     as: 'User',
                     attributes: { exclude: ['password'] },
-                },{
+                }, {
                     model: Service,
                     attributes: ['id', 'name', 'default_service_time'],
                     through: { attributes: [] },
@@ -1421,9 +1493,9 @@ exports.findAll = async (req, res) => {
 
 // API to fetch the all future appointments for the ADMIN calander
 exports.findAllAppointments = async (req, res) => {
-    const { 
-        startDate, 
-        endDate, 
+    const {
+        startDate,
+        endDate,
         search,
         salonId,
         barberId
@@ -1436,7 +1508,7 @@ exports.findAllAppointments = async (req, res) => {
 
         // Initialize appointment filter with Appointment status
         const appointmentFilter = {
-            status: [AppointmentENUM.Appointment,AppointmentENUM.Completed] // Only fetch appointments
+            status: [AppointmentENUM.Appointment, AppointmentENUM.Completed] // Only fetch appointments
         };
 
         // Role-based access control
@@ -1500,9 +1572,9 @@ exports.findAllAppointments = async (req, res) => {
                     model: Salon,
                     as: 'salon',
                     attributes: [
-                        'id', 
-                        'name', 
-                        'address', 
+                        'id',
+                        'name',
+                        'address',
                         'phone_number',
                         'open_time',
                         'close_time'
@@ -1513,8 +1585,8 @@ exports.findAllAppointments = async (req, res) => {
                     as: 'User',
                     attributes: { exclude: ['password'] }
                 },
-                { 
-                    model: Service, 
+                {
+                    model: Service,
                     attributes: ['id', 'name', 'default_service_time'],
                     through: { attributes: [] }
                 }
@@ -1531,7 +1603,7 @@ exports.findAllAppointments = async (req, res) => {
                 const userId = apt.User?.id;
                 let haircutDetails = [];
                 let paymentDetails = null;
-                
+
                 if (userId) {
                     haircutDetails = await HaircutDetails.findAll({
                         where: { UserId: userId }
@@ -1575,18 +1647,18 @@ exports.findAllAppointments = async (req, res) => {
                 return {
                     id: apt.id,
                     appointment_date: apt.appointment_date,
-                    number_of_people:apt.number_of_people,
-                    estimated_wait_time:apt.estimated_wait_time,
-                    queue_position : apt.queue_position,
-                    mobile_number : apt.mobile_number,
-                    name : apt.name,
-                    check_in_time : apt.check_in_time,
-                    in_salon_time:apt.in_salon_time,
-                    complete_time :apt.complete_time,
-                    cancel_time:apt.cancel_time,
-                    BarberId:apt.BarberId,
+                    number_of_people: apt.number_of_people,
+                    estimated_wait_time: apt.estimated_wait_time,
+                    queue_position: apt.queue_position,
+                    mobile_number: apt.mobile_number,
+                    name: apt.name,
+                    check_in_time: apt.check_in_time,
+                    in_salon_time: apt.in_salon_time,
+                    complete_time: apt.complete_time,
+                    cancel_time: apt.cancel_time,
+                    BarberId: apt.BarberId,
                     SalonId: apt.SalonId,
-                    status:apt.status,
+                    status: apt.status,
                     time_slot: {
                         start: apt.appointment_start_time,
                         end: apt.appointment_end_time
@@ -1720,9 +1792,9 @@ exports.findOne = async (req, res) => {
                         ]
                     }
                 },
-                { 
-                    model: Service, 
-                    attributes: ['id','name','min_price', 'max_price', 'default_service_time'], // Fetch the 'estimated_service_time' from the Service model
+                {
+                    model: Service,
+                    attributes: ['id', 'name', 'min_price', 'max_price', 'default_service_time'], // Fetch the 'estimated_service_time' from the Service model
                     through: { attributes: [] } // Avoid extra attributes from the join table
                 }
             ],
@@ -1731,85 +1803,85 @@ exports.findOne = async (req, res) => {
         if (!appointment) {
             return sendResponse(res, false, "Appointment not found", null, 404);
         }
-       
-            // Manually fetch associated services
-            const appointmentServices = await AppointmentService.findAll({
-                where: {
-                    AppointmentId: appointment.id
+
+        // Manually fetch associated services
+        const appointmentServices = await AppointmentService.findAll({
+            where: {
+                AppointmentId: appointment.id
+            }
+        });
+        const serviceIds = appointmentServices.map(as => as.ServiceId);
+        // Get all service IDs
+        const servicesMap = await Service.findAll({
+            where: {
+                id: serviceIds
+            },
+            attributes: ['id', 'name', 'min_price', 'max_price', 'default_service_time']
+        }).then(services => {
+            // Create a map of services by ID for quick lookup
+            return services.reduce((map, service) => {
+                map[service.id] = service;
+                return map;
+            }, {});
+        });
+
+        // Map back to maintain order and duplicates
+        const services = appointmentServices.map(as => servicesMap[as.ServiceId]);
+
+        // Add services to appointment object
+        appointment.dataValues.Services = services;
+
+        // Fetch payment details for this appointment using appointmentId
+        const payment = await Payment.findOne({
+            where: { appointmentId: appointment.id },
+            attributes: { exclude: ['createdAt', 'updatedAt', 'deletedAt'] }, // Exclude unnecessary fields
+        });
+
+        // Initialize receiptUrl
+        let receiptUrl = null;
+
+        // Get receipt URL if payment exists
+        if (payment) {
+            try {
+                const paymentIntent = await stripe.paymentIntents.retrieve(payment.paymentIntentId);
+                receiptUrl = paymentIntent.charges?.data[0]?.receipt_url;
+
+                // If not found in charges array, fetch from latest_charge
+                if (!receiptUrl && paymentIntent.latest_charge) {
+                    const charge = await stripe.charges.retrieve(paymentIntent.latest_charge);
+                    receiptUrl = charge.receipt_url;
                 }
-            });
-            const serviceIds = appointmentServices.map(as => as.ServiceId);
-            // Get all service IDs
-            const servicesMap = await Service.findAll({
+            } catch (error) {
+                console.error(`Error retrieving receipt URL for payment ${payment.id}:`, error);
+            }
+        }
+
+        // Prepare payment details (if payment exists)
+        const paymentDetails = payment ? {
+            id: payment.id,
+            amount: payment.amount,
+            tip: payment.tip,
+            tax: payment.tax,
+            discount: payment.discount,
+            totalAmount: payment.totalAmount,
+            currency: payment.currency,
+            paymentStatus: payment.paymentStatus,
+            receiptUrl: receiptUrl, // Add the receipt URL here
+        } : null;
+
+
+        // Additional logic for customers: Check if the salon is liked
+        let isLike = false;
+        if (userRole === role.CUSTOMER) {
+            const favoriteSalon = await FavoriteSalon.findOne({
                 where: {
-                    id: serviceIds
+                    UserId: userId,
+                    SalonId: appointment.SalonId,
+                    status: "like",
                 },
-                attributes: ['id', 'name', 'min_price', 'max_price', 'default_service_time']
-            }).then(services => {
-                // Create a map of services by ID for quick lookup
-                return services.reduce((map, service) => {
-                    map[service.id] = service;
-                    return map;
-                }, {});
             });
-
-            // Map back to maintain order and duplicates
-            const services = appointmentServices.map(as => servicesMap[as.ServiceId]);
-        
-            // Add services to appointment object
-            appointment.dataValues.Services = services;
-
-            // Fetch payment details for this appointment using appointmentId
-            const payment = await Payment.findOne({
-                where: { appointmentId: appointment.id },
-                attributes: { exclude: ['createdAt', 'updatedAt', 'deletedAt'] }, // Exclude unnecessary fields
-            });
-
-            // Initialize receiptUrl
-            let receiptUrl = null;
-
-            // Get receipt URL if payment exists
-            if (payment) {
-                try {
-                    const paymentIntent = await stripe.paymentIntents.retrieve(payment.paymentIntentId);
-                    receiptUrl = paymentIntent.charges?.data[0]?.receipt_url;
-
-                    // If not found in charges array, fetch from latest_charge
-                    if (!receiptUrl && paymentIntent.latest_charge) {
-                        const charge = await stripe.charges.retrieve(paymentIntent.latest_charge);
-                        receiptUrl = charge.receipt_url;
-                    }
-                } catch (error) {
-                    console.error(`Error retrieving receipt URL for payment ${payment.id}:`, error);
-                }
-            }
-
-            // Prepare payment details (if payment exists)
-            const paymentDetails = payment ? {
-                id: payment.id,
-                amount: payment.amount,
-                tip: payment.tip,
-                tax: payment.tax,
-                discount: payment.discount,
-                totalAmount: payment.totalAmount,
-                currency: payment.currency,
-                paymentStatus: payment.paymentStatus,
-                receiptUrl: receiptUrl, // Add the receipt URL here
-            } : null;
-     
-
-            // Additional logic for customers: Check if the salon is liked
-            let isLike = false;
-            if (userRole === role.CUSTOMER) {
-                const favoriteSalon = await FavoriteSalon.findOne({
-                    where: {
-                        UserId: userId,
-                        SalonId: appointment.SalonId,
-                        status: "like",
-                    },
-                });
-                isLike = !!favoriteSalon;
-            }
+            isLike = !!favoriteSalon;
+        }
 
         return sendResponse(res, true, "Fetched appointment successfully", {
             ...appointment.toJSON(),
@@ -1954,7 +2026,7 @@ exports.getWaitlistPositionWithNeighbors = async (req, res) => {
         const appointments = await Appointment.findAll({
             where: {
                 BarberId: barberId,
-                status: [AppointmentENUM.Checked_in,AppointmentENUM.In_salon]
+                status: [AppointmentENUM.Checked_in, AppointmentENUM.In_salon]
             },
             order: [['queue_position', 'ASC']],
             attributes: ['queue_position', 'status', 'number_of_people'],
@@ -1980,7 +2052,7 @@ exports.getWaitlistPositionWithNeighbors = async (req, res) => {
         });
 
         // Return the formatted waitlist with highlighted current user
-        return sendResponse(res, true, `Fetched appointment waitlist for Barber ID ${barberId} with current user highlighted`,formattedAppointments, 200);
+        return sendResponse(res, true, `Fetched appointment waitlist for Barber ID ${barberId} with current user highlighted`, formattedAppointments, 200);
 
     } catch (error) {
         return sendResponse(res, false, error.message || 'Internal server error', null, 500);
@@ -2057,7 +2129,7 @@ exports.addTimeToEstimatedWaitTime = async (req, res) => {
 
         // Fetch all appointments for the barber in queue order
         const appointments = await Appointment.findAll({
-            where: { BarberId: appointment.BarberId, status: [AppointmentENUM.Checked_in,AppointmentENUM.In_salon] },
+            where: { BarberId: appointment.BarberId, status: [AppointmentENUM.Checked_in, AppointmentENUM.In_salon] },
             order: [['queue_position', 'ASC']]
         });
 
@@ -2096,73 +2168,10 @@ exports.addTimeToEstimatedWaitTime = async (req, res) => {
     }
 };
 
-const getAppointmentsByRole = async (ischeckRole,user) => {
-        const startOfToday = new Date();
-        startOfToday.setHours(0, 0, 0, 0);
-        
-        const endOfToday = new Date();
-        endOfToday.setHours(23, 59, 59, 999);
-
-        let whereCondition = {
-            createdAt: {
-                [Op.between]: [startOfToday, endOfToday]
-            },
-            status: [AppointmentENUM.Checked_in,AppointmentENUM.In_salon,AppointmentENUM.Completed,AppointmentENUM.Canceled]
-        };
-
-        if(ischeckRole){
-            if(user.role === role.BARBER){
-                whereCondition.BarberId = user.barberId;
-            }else if(user.role === role.SALON_OWNER || user.role === role.SALON_MANAGER){
-                whereCondition.SalonId = user.salonId;
-            }
-        }
-
-        // Add condition to only fetch appointments where the barber category is 'walk_in' (category 2)
-        whereCondition['$Barber.category$'] = BarberCategoryENUM.ForWalkIn;
-
-
-         // Fetch appointments
-        const appointments = await Appointment.findAll({
-            where: whereCondition,
-            attributes: ['id', 'number_of_people', 'status', 'estimated_wait_time', 'queue_position', 'mobile_number', 'name', 'check_in_time', 'in_salon_time', 'complete_time', 'cancel_time', 'BarberId','SalonId'],
-            include: [
-                { model: User, as: 'User', attributes: ['id','firstname','lastname', 'profile_photo'] },
-                { model: Barber, as: 'Barber', attributes: ['name','background_color'] },
-                { model: Salon, as: 'salon', attributes: ['name'] },
-                { model: Service, attributes: ['id','name', 'default_service_time'] },
-            ],
-            order: [['check_in_time', 'ASC']] // Optional: order by check-in time
-        });
-
-        if (appointments.length === 0) {
-            return;
-        }
-
-        // Ensure each appointment's User is valid before attempting to access haircut details
-        const appointmentsWithHaircutDetails = await Promise.all(
-            appointments.map(async (appointment) => {
-                const userId = appointment.User ? appointment.User.id : null;
-    
-                if (userId) {
-                    const haircutDetails = await HaircutDetails.findAll({
-                        where: { UserId: userId },
-                    });
-                    appointment.dataValues.haircutDetails = haircutDetails;
-                }
-
-                                    
-                return appointment;
-            })
-        );
-    
-        return appointmentsWithHaircutDetails;
-};
-
-const getAppointmentsByRoleForAdmin = async (ischeckRole,user) => {
+const getAppointmentsByRole = async (ischeckRole, user) => {
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
-    
+
     const endOfToday = new Date();
     endOfToday.setHours(23, 59, 59, 999);
 
@@ -2170,13 +2179,13 @@ const getAppointmentsByRoleForAdmin = async (ischeckRole,user) => {
         createdAt: {
             [Op.between]: [startOfToday, endOfToday]
         },
-        status: [AppointmentENUM.Checked_in,AppointmentENUM.In_salon,AppointmentENUM.Completed,AppointmentENUM.Canceled]
+        status: [AppointmentENUM.Checked_in, AppointmentENUM.In_salon, AppointmentENUM.Completed, AppointmentENUM.Canceled]
     };
 
-    if(ischeckRole){
-        if(user.role === role.BARBER){
+    if (ischeckRole) {
+        if (user.role === role.BARBER) {
             whereCondition.BarberId = user.barberId;
-        }else if(user.role === role.SALON_OWNER || user.role === role.SALON_MANAGER){
+        } else if (user.role === role.SALON_OWNER || user.role === role.SALON_MANAGER) {
             whereCondition.SalonId = user.salonId;
         }
     }
@@ -2185,15 +2194,78 @@ const getAppointmentsByRoleForAdmin = async (ischeckRole,user) => {
     whereCondition['$Barber.category$'] = BarberCategoryENUM.ForWalkIn;
 
 
-     // Fetch appointments
+    // Fetch appointments
     const appointments = await Appointment.findAll({
         where: whereCondition,
-        attributes: ['id', 'number_of_people', 'status', 'estimated_wait_time', 'queue_position', 'mobile_number', 'name', 'check_in_time', 'in_salon_time', 'complete_time', 'cancel_time', 'BarberId','SalonId','paymentMode', 'paymentStatus'],
+        attributes: ['id', 'number_of_people', 'status', 'estimated_wait_time', 'queue_position', 'mobile_number', 'name', 'check_in_time', 'in_salon_time', 'complete_time', 'cancel_time', 'BarberId', 'SalonId'],
         include: [
-            { model: User, as: 'User', attributes: ['id','firstname','lastname', 'profile_photo'] },
-            { model: Barber, as: 'Barber', attributes: ['name','background_color'] },
+            { model: User, as: 'User', attributes: ['id', 'firstname', 'lastname', 'profile_photo'] },
+            { model: Barber, as: 'Barber', attributes: ['name', 'background_color'] },
             { model: Salon, as: 'salon', attributes: ['name'] },
-            { model: Service, attributes: ['id','name', 'default_service_time'] },
+            { model: Service, attributes: ['id', 'name', 'default_service_time'] },
+        ],
+        order: [['check_in_time', 'ASC']] // Optional: order by check-in time
+    });
+
+    if (appointments.length === 0) {
+        return;
+    }
+
+    // Ensure each appointment's User is valid before attempting to access haircut details
+    const appointmentsWithHaircutDetails = await Promise.all(
+        appointments.map(async (appointment) => {
+            const userId = appointment.User ? appointment.User.id : null;
+
+            if (userId) {
+                const haircutDetails = await HaircutDetails.findAll({
+                    where: { UserId: userId },
+                });
+                appointment.dataValues.haircutDetails = haircutDetails;
+            }
+
+
+            return appointment;
+        })
+    );
+
+    return appointmentsWithHaircutDetails;
+};
+
+const getAppointmentsByRoleForAdmin = async (ischeckRole, user) => {
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const endOfToday = new Date();
+    endOfToday.setHours(23, 59, 59, 999);
+
+    let whereCondition = {
+        createdAt: {
+            [Op.between]: [startOfToday, endOfToday]
+        },
+        status: [AppointmentENUM.Checked_in, AppointmentENUM.In_salon, AppointmentENUM.Completed, AppointmentENUM.Canceled]
+    };
+
+    if (ischeckRole) {
+        if (user.role === role.BARBER) {
+            whereCondition.BarberId = user.barberId;
+        } else if (user.role === role.SALON_OWNER || user.role === role.SALON_MANAGER) {
+            whereCondition.SalonId = user.salonId;
+        }
+    }
+
+    // Add condition to only fetch appointments where the barber category is 'walk_in' (category 2)
+    whereCondition['$Barber.category$'] = BarberCategoryENUM.ForWalkIn;
+
+
+    // Fetch appointments
+    const appointments = await Appointment.findAll({
+        where: whereCondition,
+        attributes: ['id', 'number_of_people', 'status', 'estimated_wait_time', 'queue_position', 'mobile_number', 'name', 'check_in_time', 'in_salon_time', 'complete_time', 'cancel_time', 'BarberId', 'SalonId', 'paymentMode', 'paymentStatus'],
+        include: [
+            { model: User, as: 'User', attributes: ['id', 'firstname', 'lastname', 'profile_photo'] },
+            { model: Barber, as: 'Barber', attributes: ['name', 'background_color'] },
+            { model: Salon, as: 'salon', attributes: ['name'] },
+            { model: Service, attributes: ['id', 'name', 'default_service_time'] },
         ],
         order: [['check_in_time', 'ASC']] // Optional: order by check-in time
     });
@@ -2250,7 +2322,7 @@ const getAppointmentsByRoleForAdmin = async (ischeckRole,user) => {
                 paymentStatus: payment.paymentStatus,
                 receiptUrl: receiptUrl, // Include receipt URL here
             } : null;
-                
+
             return appointment;
         })
     );
@@ -2260,10 +2332,10 @@ const getAppointmentsByRoleForAdmin = async (ischeckRole,user) => {
 
 exports.getAppointmentsByRoleForAdminExp = getAppointmentsByRoleForAdmin;
 
-const getInSalonAppointmentsByRole = async (ischeckRole,user) => {
+const getInSalonAppointmentsByRole = async (ischeckRole, user) => {
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
-    
+
     const endOfToday = new Date();
     endOfToday.setHours(23, 59, 59, 999);
 
@@ -2271,24 +2343,24 @@ const getInSalonAppointmentsByRole = async (ischeckRole,user) => {
         createdAt: {
             [Op.between]: [startOfToday, endOfToday]
         },
-        status: [ 'in_salon']
+        status: ['in_salon']
     };
 
-    if(ischeckRole){
-        if(user.role === role.BARBER){
+    if (ischeckRole) {
+        if (user.role === role.BARBER) {
             whereCondition.BarberId = user.barberId;
-        }else if(user.role === role.SALON_OWNER){
+        } else if (user.role === role.SALON_OWNER) {
             whereCondition.SalonId = user.salonId;
         }
     }
 
-     // Fetch appointments
+    // Fetch appointments
     const appointments = await Appointment.findAll({
         where: whereCondition,
-        attributes: ['id', 'number_of_people', 'status', 'estimated_wait_time', 'queue_position', 'mobile_number', 'name', 'check_in_time', 'in_salon_time', 'complete_time', 'cancel_time', 'BarberId','SalonId'],
+        attributes: ['id', 'number_of_people', 'status', 'estimated_wait_time', 'queue_position', 'mobile_number', 'name', 'check_in_time', 'in_salon_time', 'complete_time', 'cancel_time', 'BarberId', 'SalonId'],
         include: [
-            { model: User, as: 'User', attributes: ['id','firstname','lastname','profile_photo'] },
-            { model: Barber, as: 'Barber', attributes: ['name','background_color'] },
+            { model: User, as: 'User', attributes: ['id', 'firstname', 'lastname', 'profile_photo'] },
+            { model: Barber, as: 'Barber', attributes: ['name', 'background_color'] },
             { model: Salon, as: 'salon', attributes: ['name'] },
         ],
         order: [['check_in_time', 'ASC']] // Optional: order by check-in time
@@ -2310,8 +2382,8 @@ exports.findAllBoardData = async (req, res) => {
         }
         console.log("Authenticated user:", req.user);
 
-             // Fetch appointments using the utility function
-        const appointments = await getAppointmentsByRoleForAdmin(true,req.user);
+        // Fetch appointments using the utility function
+        const appointments = await getAppointmentsByRoleForAdmin(true, req.user);
 
         if (!appointments || appointments.length === 0) {
             return sendResponse(res, true, "No appointments booked yet!", null, 200);
@@ -2336,8 +2408,8 @@ exports.findInSalonUsers = async (req, res) => {
         }
         console.log("Authenticated user:", req.user);
 
-             // Fetch appointments using the utility function
-        const appointments = await getInSalonAppointmentsByRole(true,req.user);
+        // Fetch appointments using the utility function
+        const appointments = await getInSalonAppointmentsByRole(true, req.user);
 
         if (!appointments || appointments.length === 0) {
             return sendResponse(res, true, "No appointments booked yet!", null, 200);
@@ -2492,8 +2564,8 @@ exports.appointmentByBarber = async (req, res) => {
 
         const totalServiceCost = services.reduce((sum, service) => {
             const frequency = serviceFrequency[service.id] || 0;
-            const servicePrice = barberServicePriceMap[service.id] !== undefined 
-                ? barberServicePriceMap[service.id] 
+            const servicePrice = barberServicePriceMap[service.id] !== undefined
+                ? barberServicePriceMap[service.id]
                 : (service.min_price !== null && service.min_price !== undefined ? Number(service.min_price) : 0); // Fallback to 0 if no price
             return sum + (servicePrice * frequency);
         }, 0);
@@ -2672,15 +2744,15 @@ exports.getLastHaircutDetails = async (req, res) => {
 
         // First fetch current appointment to get userId
         const currentAppointment = await Appointment.findByPk(appointmentId);
-        
+
         if (!currentAppointment) {
             return res.status(404).json({ message: 'Current appointment not found.' });
         }
 
         // Find last completed appointment
         const lastAppointment = await Appointment.findOne({
-            where: { 
-                UserId: currentAppointment.UserId, 
+            where: {
+                UserId: currentAppointment.UserId,
                 status: 'completed',
                 id: { [Op.ne]: appointmentId }
             },
@@ -2688,8 +2760,8 @@ exports.getLastHaircutDetails = async (req, res) => {
         });
 
         if (!lastAppointment) {
-            return res.status(404).json({ 
-                message: 'No previous completed appointments found for this user.' 
+            return res.status(404).json({
+                message: 'No previous completed appointments found for this user.'
             });
         }
 
@@ -2699,8 +2771,8 @@ exports.getLastHaircutDetails = async (req, res) => {
         });
 
         if (!haircutDetails) {
-            return res.status(404).json({ 
-                message: 'No haircut details found for the last appointment.' 
+            return res.status(404).json({
+                message: 'No haircut details found for the last appointment.'
             });
         }
 
@@ -2710,8 +2782,8 @@ exports.getLastHaircutDetails = async (req, res) => {
         return sendResponse(res, true, 'Last HairCut Detail fetch Successfully', { lastHaircutDetails: haircutDetails }, 200);
     } catch (error) {
         console.error('Error fetching last haircut details:', error);
-        return res.status(500).json({ 
-            message: 'An error occurred while fetching last haircut details' 
+        return res.status(500).json({
+            message: 'An error occurred while fetching last haircut details'
         });
     }
 };
@@ -2747,7 +2819,7 @@ exports.getAppointments = async (req, res) => {
                 return sendResponse(res, false, "Unauthorized: Salon ID is missing.", null, 403);
             }
             appointmentFilter.SalonId = req.user.salonId;
-        }else if (userRole !== role.ADMIN) {
+        } else if (userRole !== role.ADMIN) {
             return sendResponse(res, false, "Unauthorized: Invalid role.", null, 403);
         }
 
@@ -2768,8 +2840,8 @@ exports.getAppointments = async (req, res) => {
         if (status === null || status === "" || status === undefined) {
             // If no status is provided, fetch all appointments, regardless of status or date
             // No need to add any status or date filter in this case.
-        }else{
-            const allowedStatuses = [AppointmentENUM.In_salon,AppointmentENUM.Checked_in,AppointmentENUM.Canceled,AppointmentENUM.Completed];
+        } else {
+            const allowedStatuses = [AppointmentENUM.In_salon, AppointmentENUM.Checked_in, AppointmentENUM.Canceled, AppointmentENUM.Completed];
             if (allowedStatuses.includes(status)) {
                 appointmentFilter.status = status;
             } else {
@@ -2784,7 +2856,7 @@ exports.getAppointments = async (req, res) => {
                 { '$Barber.name$': { [Sequelize.Op.iLike]: `%${search}%` } },
                 { '$salon.name$': { [Sequelize.Op.iLike]: `%${search}%` } },
                 // { '$User.username$': { [Sequelize.Op.iLike]: `%${search}%` } },
-                {  name: { [Sequelize.Op.iLike]: `%${search}%` } }
+                { name: { [Sequelize.Op.iLike]: `%${search}%` } }
             );
         }
 
@@ -2815,9 +2887,9 @@ exports.getAppointments = async (req, res) => {
                     as: 'User',
                     attributes: { exclude: ['password'] },
                 },
-                { 
-                    model: Service, 
-                    attributes: ['id','name', 'default_service_time'], // Fetch the 'estimated_service_time' from the Service model
+                {
+                    model: Service,
+                    attributes: ['id', 'name', 'default_service_time'], // Fetch the 'estimated_service_time' from the Service model
                     through: { attributes: [] } // Avoid extra attributes from the join table
                 },
             ]
@@ -3011,7 +3083,7 @@ exports.appointmentByUserId = async (req, res) => {
         // Get today's date boundaries
         const todayStart = moment().startOf('day').toDate();
         const todayEnd = moment().endOf('day').toDate();
-        
+
         let whereCondition = {
             UserId: userId,
         };
