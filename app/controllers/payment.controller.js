@@ -5,7 +5,8 @@ const { isOnlinePaymentEnabled } = require('../helpers/configurationHelper'); //
 const db = require("../models");
 const { Payment, Appointment, Service } = require('../models'); // Adjust path as needed
 const { PaymentMethodENUM } = require('../config/paymentEnums.config');
-const { INVITE_BOOKING_APPOINTMENT_TEMPLATE_ID } = require("../config/sendGridConfig");
+const { INVITE_BOOKING_APPOINTMENT_TEMPLATE_ID} = require("../config/sendGridConfig");
+const { REFUND_PAYMENT} = require("../config/sendGridConfig");
 const { appCheck } = require('firebase-admin');
 const { sendEmail } = require("../services/emailService");
 const { sendMessageToUser } = require('./socket.controller');
@@ -255,6 +256,21 @@ exports.handleWebhook = async (req, res) => {
                 cancel_time: refund.status === 'succeeded' ? new Date() : appointment.cancel_time,
             });
         }
+
+        const user = await db.USER.findByPk(appointment.UserId);
+
+        const customerData = {
+            email:user.email,
+            paymentIntentId: paymentIntentId,
+            totalAmount: totalAmount,
+            customer_name: `${firstname} ${lastname}`,
+            refundId:refundId,
+            refundReason:refundReason,
+            cancel_time:cancel_time,
+            email_subject: 'Refund Payment',
+        };
+
+        await sendEmail(email, "Refund Payment", REFUND_PAYMENT, customerData);
     };
 
     switch (event.type) {
