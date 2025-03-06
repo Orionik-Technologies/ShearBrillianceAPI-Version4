@@ -519,21 +519,21 @@ exports.getTopBarbers = async (req, res) => {
                 limit: 5,
             });
 
-            // Fetch barber details including SalonId
+            // Fetch barber details including SalonId and background_color
             const barberIds = topBarbers.map(barber => barber.BarberId);
             const barberData = await Barber.findAll({
                 where: { id: barberIds },
-                attributes: ['id', 'name', 'SalonId'], // Include SalonId
+                attributes: ['id', 'name', 'SalonId', 'background_color'], // Added background_color
             });
 
             // Fetch salon details for the barbers' salons
-            const salonIds = barberData.map(barber => barber.SalonId).filter(id => id); // Filter out null/undefined
+            const salonIds = barberData.map(barber => barber.SalonId).filter(id => id);
             const salonData = await Salon.findAll({
                 where: { id: salonIds },
-                attributes: ['id', 'name'], // Assuming 'name' is the salon name field
+                attributes: ['id', 'name'],
             });
 
-            // Map top barbers with their details and salon name
+            // Map top barbers with their details including background_color
             topBarbersWithDetails = topBarbers.map(barber => {
                 const barberDetails = barberData.find(b => b.id === barber.BarberId);
                 const salonDetails = salonData.find(s => s.id === barberDetails?.SalonId);
@@ -542,17 +542,19 @@ exports.getTopBarbers = async (req, res) => {
                     appointmentsCount: barber.dataValues.appointmentsCount,
                     barberName: barberDetails ? barberDetails.name : 'Unknown',
                     salonName: salonDetails ? salonDetails.name : 'Unknown',
+                    backgroundColor: barberDetails ? barberDetails.background_color : null // Added background_color
                 };
             });
         } else if (userRole === role.SALON_MANAGER) {
-            // Query for barber usage data specific to the salon, including salon name
+            // Query for barber usage data specific to the salon, including background_color
             const barbersUsage = await db.sequelize.query(
                 `
                 SELECT 
                   "Appointments"."BarberId" AS barberId,
                   COUNT("Appointments"."id") AS appointmentsCount,
                   "Barbers"."name" AS barberName,
-                  "Salons"."name" AS salonName
+                  "Salons"."name" AS salonName,
+                  "Barbers"."background_color" AS backgroundColor
                 FROM 
                   public."Appointments" AS "Appointments"
                 INNER JOIN 
@@ -566,23 +568,25 @@ exports.getTopBarbers = async (req, res) => {
                   "Barbers"."id", 
                   "Barbers"."name",
                   "Salons"."id",
-                  "Salons"."name"
+                  "Salons"."name",
+                  "Barbers"."background_color"
                 ORDER BY 
                   appointmentsCount DESC
                 LIMIT 5
                 `,
                 {
-                    replacements: { salonId: req.user.salonId }, // Replace :salonId with the user's salonId
-                    type: db.sequelize.QueryTypes.SELECT, // Specify query type
+                    replacements: { salonId: req.user.salonId },
+                    type: db.sequelize.QueryTypes.SELECT,
                 }
             );
 
-            // Map the results to the desired format
+            // Map the results to the desired format including backgroundColor
             topBarbersWithDetails = barbersUsage.map(barber => ({
                 barberId: barber.barberid,
                 appointmentsCount: barber.appointmentscount,
                 barberName: barber.barbername,
                 salonName: barber.salonname,
+                backgroundColor: barber.backgroundcolor // Added backgroundColor
             }));
         }
 
