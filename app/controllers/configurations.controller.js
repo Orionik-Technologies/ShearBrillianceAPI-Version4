@@ -26,7 +26,7 @@ exports.updatePaymentConfig = async (req, res) => {
     // Ensure enableOnlinePayment is only true if Stripe credentials are set
     if (!process.env.STRIPE_SECRET_KEY || !process.env.STRIPE_WEBHOOK_SECRET) {
         enableOnlinePayment = false;
-        return sendResponse(res, false, 'Please Enable Stripe Service', null, 400);
+        return sendResponse(res, false, 'Please Enable Stripe Service', {enableOnlinePayment}, 400);
     }
 
     try {

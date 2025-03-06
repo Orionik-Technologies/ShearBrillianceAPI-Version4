@@ -1,4 +1,5 @@
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const Stripe = require('stripe');
+const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null;
 const { end } = require('pdfkit');
 const sendResponse = require('../helpers/responseHelper'); // Import the helper function
 const { isOnlinePaymentEnabled } = require('../helpers/configurationHelper'); // Import the helper function
