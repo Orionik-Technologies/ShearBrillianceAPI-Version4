@@ -546,8 +546,8 @@ class BarberSlotManager {
                                         !(barber.non_working_days || []).includes(dayOfWeek);
 
                 if (existingSession) {
-                    const scheduleChanged = existingSession.start_time !== daySchedule.start_time || 
-                                        existingSession.end_time !== daySchedule.end_time;
+                    const scheduleChanged = existingSession.start_time !==  daySchedule?.start_time || 
+                                        existingSession.end_time !== daySchedule?.end_time;
                     const needsUpdate = scheduleChanged || categoryChanged;
 
                     if (!shouldHaveSession) {
