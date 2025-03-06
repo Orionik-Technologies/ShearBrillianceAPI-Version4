@@ -416,6 +416,9 @@ async function handleBarberCategoryLogic(barber, user_id, totalServiceTime, appo
             appointmentData.queue_position = numberOfUsersInQueue + 1;
             appointmentData.check_in_time = new Date();
 
+
+            appointmentData.estimated_wait_time = null;
+            appointmentData.queue_position = null;
             // Update barber session remaining time
             // await barberSession.update({ 
             //     remaining_time: remainingTime - totalServiceTime 
