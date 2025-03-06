@@ -1467,13 +1467,14 @@ exports.customerYearlyStatus = async (req, res) => {
                 having: db.sequelize.literal('COUNT(id) > 1'),
             });
 
-            // **New Customers** (Customers created within the month)
-            const newCustomers = await User.count({
+            // **New Customers** (Users whose first appointment is within the month)
+            const newCustomers = await Appointment.count({
                 where: {
-                    RoleId: customerRole.id,
-                    createdAt: { [Op.between]: [monthStart, monthEnd] },
                     ...whereCondition,
-                }
+                    createdAt: { [Op.between]: [monthStart, monthEnd] },
+                },
+                distinct: true,
+                col: 'UserId' // Count unique UserIds
             });
 
             // **Total Customers** (All customers)
