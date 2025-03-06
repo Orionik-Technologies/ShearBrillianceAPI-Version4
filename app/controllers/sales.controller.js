@@ -516,7 +516,7 @@ exports.getTopBarbers = async (req, res) => {
                 ],
                 group: ['BarberId'],
                 order: [[db.sequelize.fn('COUNT', db.sequelize.col('id')), 'DESC']],
-                limit: 5,
+                limit: 3,
             });
 
             // Fetch barber details including SalonId and background_color
