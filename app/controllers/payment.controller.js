@@ -13,6 +13,7 @@ const { sendSMS } = require('../services/smsService');
 const { AppointmentENUM } = require("../config/appointment.config");
 const { BarberCategoryENUM } = require('../config/barberCategory.config');
 const { broadcastBoardUpdates } = require('../controllers/socket.controller');
+const { Op, where } = require("sequelize");
 const { getAppointmentsByRoleExp, handleBarberCategoryLogicExp, prepareEmailDataExp, sendAppointmentNotificationsExp, fetchAppointmentWithServicesExp, validateAndAttachServicesExp, markSlotsAsBookedExp, verifyConsecutiveSlotsExp, markSlotsAsRelesedExp } = require('../controllers/appointments.controller');
 
 /* function for checked_in appointment time calculations start */
@@ -74,6 +75,29 @@ const getEstimatedWaitTimeForBarber = async (barberId) => {
         numberOfUsersInQueue: cumulativeQueuePosition // Total number of people in the queue
     };
 };
+
+// Helper function to calculate remaining time for walk-ins
+function calculateRemainingTime(barberSession, activeAppointments) {
+    if (activeAppointments.length > 0) {
+        return barberSession.remaining_time;
+    }
+
+    const now = new Date();
+    const today = new Date();
+    const endTimeString = `${today.getFullYear()}-${today.getMonth() + 1}-${today.getDate()} ${barberSession.end_time}`;
+    const sessionEndTime = new Date(endTimeString);
+
+    if (isNaN(sessionEndTime)) {
+        throw new Error("Invalid session end time format");
+    }
+
+    return Math.max(
+        Math.round((sessionEndTime - now) / (1000 * 60)),
+        0
+    );
+}
+
+exports.calculateRemainingTimeExp = calculateRemainingTime;
 
 exports.createPayment = async (req, res) => {
     try {
@@ -254,18 +278,12 @@ exports.handleWebhook = async (req, res) => {
                 estimated_wait_time: appointmentData.estimated_wait_time === 'null' ? null : appointmentData.estimated_wait_time,
                 queue_position: appointmentData.queue_position === 'null' ? null : appointmentData.queue_position,
             };
-
+            const barber = await db.Barber.findByPk(appointmentData.BarberId);
             console.log('Cleaned Appointment Data:', cleanedAppointmentData);
-            let barberSession = null;
-
             try {
-
-                // Force an error to test the catch block
-                //throw new Error("Forced error for debugging");
-
+                
                 // save the barber sessionin db when checkin appointment type
                 // Handle barber category logic (for walk-in appointments)
-                const barber = await db.Barber.findByPk(appointmentData.BarberId);
                 if (!barber) {
                     throw new Error('Barber not found');
                 }
@@ -457,9 +475,10 @@ exports.handleWebhook = async (req, res) => {
 
                     if (!slot) {
                         throw new Error('Selected slot is not available');
+                    }else{
+                        await markSlotsAsRelesedExp([{ id: cleanedAppointmentData.SlotId }]);
                     }
 
-                    await markSlotsAsRelesedExp([{ id: cleanedAppointmentData.SlotId }]);
                 }
 
                 // handle return refund payment
