@@ -1,7 +1,9 @@
 const { AppointmentENUM } = require("../config/appointment.config");
 const { BarberCategoryENUM } = require("../config/barberCategory.config");
 const { PaymentMethodENUM } = require("../config/paymentEnums.config");
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const { REFUND_PAYMENT} = require("../config/sendGridConfig");
+const Stripe = require('stripe');
+const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null;
 const db = require("../models");
 const Appointment = db.Appointment;
 const Barber = db.Barber;
@@ -275,8 +277,8 @@ async function sendAppointmentNotifications(appointment, name, mobile_number, us
     const salonName = salon ? salon.name : 'the selected salon';
 
     const message = `Dear ${name}, your appointment has been successfully booked at ${salonName}. ${appointment.estimated_wait_time
-            ? `The estimated wait time is ${appointment.estimated_wait_time} minutes.`
-            : `Your appointment is scheduled for ${appointment.appointment_date} at ${appointment.appointment_start_time}.`
+        ? `The estimated wait time is ${appointment.estimated_wait_time} minutes.`
+        : `Your appointment is scheduled for ${appointment.appointment_date} at ${appointment.appointment_start_time}.`
         } We look forward to serving you.`;
 
     try {
@@ -472,7 +474,7 @@ async function handleBarberCategoryLogic(barber, user_id, totalServiceTime, appo
             appointmentData.appointment_start_time = slot.start_time;
             appointmentData.appointment_end_time = endTime.toTimeString().split(' ')[0];
 
-            
+
             // Mark slots as booked
             //await markSlotsAsBooked(requiredSlots);
         }
@@ -1215,16 +1217,28 @@ exports.cancel = async (req, res) => {
                             paymentStatus: 'Processing',
                         });
 
+
+                        const user = await db.USER.findByPk(appointment.UserId);
+
+                        const customerData = {
+                            paymentIntentId:payment.id,
+                            totalAmount:payment.amount,
+                            salonname:salonName.toString(),
+                            location:salonAddress.toString(),
+                            email_subject: 'Refund Payment',
+                        };
+
+                        await sendEmail(user.email, "Refund Payment", REFUND_PAYMENT, customerData);
                         console.log(`Refund initiated for Payment Intent ${appointment.stripePaymentIntentId}: Refund ID ${refund.id}`);
                     } catch (refundError) {
                         if (refundError.code === 'charge_already_refunded') {
-                            
+
                             // Update Payment and Appointment to "Processing" during refund
                             await payment.update({
                                 paymentStatus: 'Refunded',
                             });
                             await handleAppointmentCancellation(appointment, res);
-                            
+
                         }
                         console.error("Error initiating refund:", refundError);
                         return sendResponse(res, false, "Failed to initiate refund", null, 500);
@@ -2974,57 +2988,19 @@ exports.findOneDetails = async (req, res) => {
             return sendResponse(res, false, "Appointment not found", null, 404);
         }
 
-        // Add payment details logic
-        let category = '';
-        if (appointment.Barber && appointment.Barber.category === BarberCategoryENUM.ForAppointment) {
-            category = 'Appointment';
-        } else if (appointment.Barber && appointment.Barber.category === BarberCategoryENUM.ForWalkIn) {
-            category = 'Checked in';
-        }
-
-        const payment = await Payment.findOne({
-            where: { appointmentId: appointment.id },
-            attributes: { exclude: ['createdAt', 'updatedAt', 'deletedAt'] },
-        });
-
-        let receiptUrl = null;
-        if (payment) {
-            try {
-                const paymentIntent = await stripe.paymentIntents.retrieve(payment.paymentIntentId);
-                receiptUrl = paymentIntent.charges?.data[0]?.receipt_url;
-
-                if (!receiptUrl && paymentIntent.latest_charge) {
-                    const charge = await stripe.charges.retrieve(paymentIntent.latest_charge);
-                    receiptUrl = charge.receipt_url;
-                }
-            } catch (error) {
-                console.error(`Error retrieving receipt URL for payment ${payment.id}:`, error);
-            }
-        }
-
-        const paymentDetails = payment ? {
-            id: payment.id,
-            amount: payment.amount,
-            tip: payment.tip,
-            tax: payment.tax,
-            discount: payment.discount,
-            totalAmount: payment.totalAmount,
-            currency: payment.currency,
-            paymentStatus: payment.paymentStatus,
-            receiptUrl: receiptUrl,
-        } : null;
-
         // Get appointment services with potential duplicates
         const appointmentServices = await AppointmentService.findAll({
             where: {
                 AppointmentId: appointment.id,
             },
-            order: [['id', 'ASC']],
+            order: [['id', 'ASC']], // Maintain consistent order
         });
 
+        // Get unique service IDs for fetching service details
         const serviceIds = appointmentServices.map(as => as.ServiceId);
         const uniqueServiceIds = [...new Set(serviceIds)];
 
+        // Get all services details
         const servicesDetails = await Service.findAll({
             where: {
                 id: uniqueServiceIds,
@@ -3032,11 +3008,13 @@ exports.findOneDetails = async (req, res) => {
             attributes: ['id', 'name', 'description', 'min_price', 'max_price', 'default_service_time'],
         });
 
+        // Create a map for quick service lookup
         const servicesMap = servicesDetails.reduce((map, service) => {
             map[service.id] = service.toJSON();
             return map;
         }, {});
 
+        // Get barber services with prices
         const barberServices = await BarberService.findAll({
             where: {
                 BarberId: appointment.BarberId,
@@ -3053,11 +3031,13 @@ exports.findOneDetails = async (req, res) => {
             nest: true,
         });
 
+        // Create map of barber services with prices
         const barberServicePrices = barberServices.reduce((map, bs) => {
             map[bs.service.id] = bs.price;
             return map;
         }, {});
 
+        // Create Services array maintaining original order and duplicates
         const services = appointmentServices.map(as => ({
             id: servicesMap[as.ServiceId].id,
             name: servicesMap[as.ServiceId].name,
@@ -3066,6 +3046,7 @@ exports.findOneDetails = async (req, res) => {
             default_service_time: servicesMap[as.ServiceId].default_service_time
         }));
 
+        // Create barbersWithServices array maintaining same order and duplicates as Services
         const barbersWithServices = appointmentServices.map(as => ({
             id: servicesMap[as.ServiceId].id,
             name: servicesMap[as.ServiceId].name,
@@ -3090,8 +3071,6 @@ exports.findOneDetails = async (req, res) => {
 
         // Convert appointment to plain object and add our custom fields
         const appointmentData = appointment.toJSON();
-        appointmentData.category = category;
-        appointmentData.payment = paymentDetails;
         appointmentData.Services = services;
         appointmentData.barbersWithServices = barbersWithServices;
         appointmentData.is_like = isLike;

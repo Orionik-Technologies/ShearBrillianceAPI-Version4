@@ -1,6 +1,9 @@
 // controllers/configController.js
 const db = require('../models');
 const sendResponse = require('../helpers/responseHelper');
+require('dotenv').config();
+
+
 
 exports.getPaymentConfig = async (req, res) => {
     try {
@@ -14,10 +17,16 @@ exports.getPaymentConfig = async (req, res) => {
 };
 
 exports.updatePaymentConfig = async (req, res) => {
-    const { enableOnlinePayment } = req.body;
+    let { enableOnlinePayment } = req.body;
 
     if (typeof enableOnlinePayment !== 'boolean') {
         return sendResponse(res, false, 'enableOnlinePayment must be a boolean', null, 400);
+    }
+
+    // Ensure enableOnlinePayment is only true if Stripe credentials are set
+    if (!process.env.STRIPE_SECRET_KEY || !process.env.STRIPE_WEBHOOK_SECRET) {
+        enableOnlinePayment = false;
+        return sendResponse(res, false, 'Please Enable Stripe Service', {enableOnlinePayment}, 400);
     }
 
     try {
@@ -25,6 +34,7 @@ exports.updatePaymentConfig = async (req, res) => {
             key: 'enable_online_payment',
             value: enableOnlinePayment,
         });
+
         return sendResponse(res, true, 'Payment configuration updated', { enableOnlinePayment }, 200);
     } catch (error) {
         console.error('Error updating payment configuration:', error);
