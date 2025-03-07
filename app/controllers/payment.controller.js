@@ -178,10 +178,10 @@ exports.createPayment = async (req, res) => {
             amount: amountInCents,
             currency: 'usd',
             metadata: {
-                user_id: user_id.toString(),
-                appointmentData: serializedAppointmentData,
-                tip: validatedTip.toString(),
-                totalServiceTime: totalServiceTime
+                user_id: user_id.toString() || '',
+                appointmentData: serializedAppointmentData || '{}',
+                tip: validatedTip !== undefined ? validatedTip.toString() : '0',
+                totalServiceTime: totalServiceTime?.toString() || '0'
             },
             automatic_payment_methods: {
                 enabled: true,
