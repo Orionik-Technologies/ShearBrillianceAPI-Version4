@@ -1712,7 +1712,6 @@ exports.findAllAppointments = async (req, res) => {
 /* furure appointment fetch end for calendar */
 
 
-
 // Get an appointment by ID for customer side 
 exports.findOne = async (req, res) => {
     try {
