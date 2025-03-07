@@ -1632,7 +1632,7 @@ exports.findAllAppointments = async (req, res) => {
 
                 // Get receipt URL from Stripe if payment exists
                 let receiptUrl = null;
-                if (payment) {
+                if (payment && payment.paymentIntentId) {
                     try {
                         const paymentIntent = await stripe.paymentIntents.retrieve(payment.paymentIntentId);
                         receiptUrl = paymentIntent.charges?.data[0]?.receipt_url;
