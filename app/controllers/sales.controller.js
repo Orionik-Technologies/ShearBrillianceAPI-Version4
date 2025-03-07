@@ -665,7 +665,7 @@ exports.getPaymentData = async (req, res) => {
 
 
 exports.generateSalesReport = async (req, res) => {
-    const { startDate, endDate } = req.query;
+    const { startDate, endDate, salonId, barberId } = req.query;
 
     try {
         const userId = req.user ? req.user.id : null;
@@ -699,7 +699,15 @@ exports.generateSalesReport = async (req, res) => {
         let salesData = [];
         let paymentData = [];
 
-        // Fetch data based on user role (unchanged logic)
+        // Build dynamic where clause for appointments
+        const appointmentWhereClause = {
+            status: 'completed',
+            createdAt: { [Op.between]: [reportStartDate, reportEndDate] },
+        };
+        if (salonId) appointmentWhereClause.SalonId = salonId;
+        if (barberId) appointmentWhereClause.BarberId = barberId;
+
+        // Fetch data based on user role
         if (userRole === role.ADMIN) {
             salesData = await Appointment.findAll({
                 attributes: [
@@ -708,10 +716,7 @@ exports.generateSalesReport = async (req, res) => {
                     [db.Sequelize.fn('COUNT', db.Sequelize.col('Appointment.id')), 'appointments'],
                     'paymentMode',
                 ],
-                where: {
-                    status: 'completed',
-                    createdAt: { [Op.between]: [reportStartDate, reportEndDate] },
-                },
+                where: appointmentWhereClause,
                 group: [
                     'SalonId',
                     db.Sequelize.fn('DATE', db.Sequelize.col('Appointment.createdAt')),
@@ -739,6 +744,9 @@ exports.generateSalesReport = async (req, res) => {
                 raw: true,
             });
         } else if (userRole === role.SALON_MANAGER) {
+            // For SALON_MANAGER, ensure SalonId matches user's salon unless overridden by query
+            appointmentWhereClause.SalonId = salonId || req.user.salonId;
+
             salesData = await Appointment.findAll({
                 attributes: [
                     'SalonId',
@@ -747,11 +755,7 @@ exports.generateSalesReport = async (req, res) => {
                     [db.Sequelize.fn('SUM', db.Sequelize.col('Services.max_price')), 'revenue'],
                     'paymentMode',
                 ],
-                where: {
-                    status: 'completed',
-                    createdAt: { [Op.between]: [reportStartDate, reportEndDate] },
-                    SalonId: req.user.salonId,
-                },
+                where: appointmentWhereClause,
                 include: [{ model: Service, through: { attributes: [] }, attributes: [] }],
                 group: [
                     'SalonId',
@@ -775,7 +779,7 @@ exports.generateSalesReport = async (req, res) => {
                     paymentStatus: 'Success',
                     createdAt: { [Op.between]: [reportStartDate, reportEndDate] },
                     appointmentId: {
-                        [Op.in]: db.Sequelize.literal(`(SELECT id FROM Appointments WHERE SalonId = ${req.user.salonId} AND status = 'completed')`)
+                        [Op.in]: db.Sequelize.literal(`(SELECT id FROM Appointments WHERE SalonId = ${appointmentWhereClause.SalonId} AND status = 'completed'${barberId ? ` AND BarberId = ${barberId}` : ''})`)
                     }
                 },
                 group: [db.Sequelize.fn('DATE', db.Sequelize.col('Payment.createdAt'))],
@@ -908,7 +912,9 @@ exports.generateSalesReport = async (req, res) => {
     }
 };
 
-// Enhanced HTML Report Generator for a User-Friendly and Nice Look
+// Enhanced HTML Report Generator for a User-Friendly and Nice Look''''
+
+
 function generateHTMLReport(formattedDataBySalon, salonMap, start, end, timezone) {
     let html = `
         <html>
