@@ -1716,77 +1716,47 @@ exports.findAllAppointments = async (req, res) => {
 // Get an appointment by ID for customer side 
 exports.findOne = async (req, res) => {
     try {
-        const { role: userRole, id: userId } = req.user; // Extract role and user ID from token
+        const { role: userRole, id: userId } = req.user;
         const appointmentId = req.params.id;
 
         if (!appointmentId) {
             return sendResponse(res, false, "Appointment ID is required", null, 400);
         }
 
-        let whereCondition = { id: appointmentId }; // Default condition: fetch by appointment ID
+        let whereCondition = { id: appointmentId };
         let barberId = null;
 
-        // Role-specific logic
+        // Role-specific logic (unchanged)
         if (userRole === role.BARBER) {
-            // Fetch Barber ID for the logged-in user
             const barber = await Barber.findOne({ where: { UserId: userId } });
             if (!barber) {
-                return sendResponse(
-                    res,
-                    false,
-                    "No barber profile found for this user",
-                    null,
-                    404
-                );
+                return sendResponse(res, false, "No barber profile found for this user", null, 404);
             }
             barberId = barber.id;
-            whereCondition.BarberId = barberId; // Barbers can only access their own appointments
+            whereCondition.BarberId = barberId;
         } else if (userRole === role.CUSTOMER) {
-            // Customers can only access their own appointments
             whereCondition.UserId = userId;
         } else if (userRole === role.SALON_OWNER) {
-            // Salon Owners can access appointments related to their salon's barbers
             const salon = await Salon.findOne({ where: { UserId: userId } });
             if (!salon) {
-                return sendResponse(
-                    res,
-                    false,
-                    "No salon profile found for this user",
-                    null,
-                    404
-                );
+                return sendResponse(res, false, "No salon profile found for this user", null, 404);
             }
             whereCondition.SalonId = salon.id;
         } else if (userRole === role.SALON_MANAGER) {
-            // Salon Managers can access appointments related to their assigned salon
-            const userSalon = await UserSalon.findOne({ where: { UserId: userId } }); // Fetch assigned salon for the manager
+            const userSalon = await UserSalon.findOne({ where: { UserId: userId } });
             if (!userSalon) {
-                return sendResponse(
-                    res,
-                    false,
-                    "No assigned salon found for this manager",
-                    null,
-                    404
-                );
+                return sendResponse(res, false, "No assigned salon found for this manager", null, 404);
             }
-
-            const salonRole = await Salon.findOne({ where: { id: userSalon.SalonId } }); // Fetch salon details
+            const salonRole = await Salon.findOne({ where: { id: userSalon.SalonId } });
             if (!salonRole) {
-                return sendResponse(
-                    res,
-                    false,
-                    "No salon profile found for this manager",
-                    null,
-                    404
-                );
+                return sendResponse(res, false, "No salon profile found for this manager", null, 404);
             }
-            whereCondition.SalonId = salonRole.id; // Restrict appointments to the manager's assigned salon
+            whereCondition.SalonId = salonRole.id;
         } else if (userRole !== role.ADMIN) {
-            // For undefined roles, deny access
             return sendResponse(res, false, "Unauthorized access", null, 403);
         }
 
-        // Fetch the appointment with Salon and Barber data
+        // Fetch appointment (unchanged)
         const appointment = await Appointment.findOne({
             where: whereCondition,
             include: [
@@ -1801,15 +1771,15 @@ exports.findOne = async (req, res) => {
                     attributes: { exclude: ['createdAt', 'updatedAt'] },
                     where: {
                         [Op.or]: [
-                            { category: BarberCategoryENUM.ForWalkIn }, // Include ForWalkIn category
-                            { category: BarberCategoryENUM.ForAppointment } // Include ForAppointment category
+                            { category: BarberCategoryENUM.ForWalkIn },
+                            { category: BarberCategoryENUM.ForAppointment }
                         ]
                     }
                 },
                 {
                     model: Service,
-                    attributes: ['id', 'name', 'min_price', 'max_price', 'default_service_time'], // Fetch the 'estimated_service_time' from the Service model
-                    through: { attributes: [] } // Avoid extra attributes from the join table
+                    attributes: ['id', 'name', 'min_price', 'max_price', 'default_service_time'],
+                    through: { attributes: [] }
                 }
             ],
         });
@@ -1818,49 +1788,78 @@ exports.findOne = async (req, res) => {
             return sendResponse(res, false, "Appointment not found", null, 404);
         }
 
-        // Manually fetch associated services
+        // Fetch appointment services
         const appointmentServices = await AppointmentService.findAll({
             where: {
                 AppointmentId: appointment.id
-            }
+            },
+            order: [['id', 'ASC']] // Maintain consistent order
         });
         const serviceIds = appointmentServices.map(as => as.ServiceId);
-        // Get all service IDs
+
+        // Get service details
         const servicesMap = await Service.findAll({
             where: {
                 id: serviceIds
             },
             attributes: ['id', 'name', 'min_price', 'max_price', 'default_service_time']
         }).then(services => {
-            // Create a map of services by ID for quick lookup
             return services.reduce((map, service) => {
-                map[service.id] = service;
+                map[service.id] = service.toJSON();
                 return map;
             }, {});
         });
 
-        // Map back to maintain order and duplicates
-        const services = appointmentServices.map(as => servicesMap[as.ServiceId]);
-
-        // Add services to appointment object
-        appointment.dataValues.Services = services;
-
-        // Fetch payment details for this appointment using appointmentId
-        const payment = await Payment.findOne({
-            where: { appointmentId: appointment.id },
-            attributes: { exclude: ['createdAt', 'updatedAt', 'deletedAt'] }, // Exclude unnecessary fields
+        // Fetch barber-specific service prices
+        const barberServices = await BarberService.findAll({
+            where: {
+                BarberId: appointment.BarberId,
+                SalonId: appointment.SalonId,
+            },
+            include: [{
+                model: Service,
+                as: 'service',
+                attributes: ['id']
+            }],
+            raw: true,
+            nest: true
         });
 
-        // Initialize receiptUrl
-        let receiptUrl = null;
+        // Create map of barber service prices
+        const barberServicePrices = barberServices.reduce((map, bs) => {
+            map[bs.service.id] = bs.price;
+            return map;
+        }, {});
 
-        // Get receipt URL if payment exists
+        // Create services array with barber prices
+        const services = appointmentServices.map(as => ({
+            id: servicesMap[as.ServiceId].id,
+            name: servicesMap[as.ServiceId].name,
+            min_price: servicesMap[as.ServiceId].min_price,
+            max_price: servicesMap[as.ServiceId].max_price,
+            default_service_time: servicesMap[as.ServiceId].default_service_time,
+            barber_price: barberServicePrices[as.ServiceId] || servicesMap[as.ServiceId].min_price
+        }));
+
+        // Add category based on barber type
+        let category = '';
+        if (appointment.Barber) {
+            category = appointment.Barber.category === BarberCategoryENUM.ForAppointment 
+                ? 'Appointment' 
+                : 'Checked in';
+        }
+
+        // Fetch payment details (unchanged)
+        const payment = await Payment.findOne({
+            where: { appointmentId: appointment.id },
+            attributes: { exclude: ['createdAt', 'updatedAt', 'deletedAt'] },
+        });
+
+        let receiptUrl = null;
         if (payment) {
             try {
                 const paymentIntent = await stripe.paymentIntents.retrieve(payment.paymentIntentId);
                 receiptUrl = paymentIntent.charges?.data[0]?.receipt_url;
-
-                // If not found in charges array, fetch from latest_charge
                 if (!receiptUrl && paymentIntent.latest_charge) {
                     const charge = await stripe.charges.retrieve(paymentIntent.latest_charge);
                     receiptUrl = charge.receipt_url;
@@ -1870,7 +1869,6 @@ exports.findOne = async (req, res) => {
             }
         }
 
-        // Prepare payment details (if payment exists)
         const paymentDetails = payment ? {
             id: payment.id,
             amount: payment.amount,
@@ -1880,11 +1878,10 @@ exports.findOne = async (req, res) => {
             totalAmount: payment.totalAmount,
             currency: payment.currency,
             paymentStatus: payment.paymentStatus,
-            receiptUrl: receiptUrl, // Add the receipt URL here
+            receiptUrl: receiptUrl,
         } : null;
 
-
-        // Additional logic for customers: Check if the salon is liked
+        // Check if salon is liked (unchanged)
         let isLike = false;
         if (userRole === role.CUSTOMER) {
             const favoriteSalon = await FavoriteSalon.findOne({
@@ -1897,12 +1894,14 @@ exports.findOne = async (req, res) => {
             isLike = !!favoriteSalon;
         }
 
-        return sendResponse(res, true, "Fetched appointment successfully", {
-            ...appointment.toJSON(),
-            Service: services,
-            payment: paymentDetails, // Add payment details (or null if no payment exists)
-            is_like: isLike,
-        }, 200);
+        // Prepare response with added category and enhanced services
+        const appointmentData = appointment.toJSON();
+        appointmentData.category = category;
+        appointmentData.Services = services;  // Updated services with barber prices
+        appointmentData.payment = paymentDetails;
+        appointmentData.is_like = isLike;
+
+        return sendResponse(res, true, "Fetched appointment successfully", appointmentData, 200);
     } catch (error) {
         console.error("Error fetching appointment:", error.message);
         return sendResponse(res, false, error.message || "Internal server error", null, 500);
