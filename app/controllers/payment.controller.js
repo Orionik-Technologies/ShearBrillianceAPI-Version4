@@ -414,41 +414,16 @@ exports.handleWebhook = async (req, res) => {
                 const user = await db.USER.findOne({ where: { id: userId }, attributes: ['email'] });
 
 
-                // let receiptUrl = paymentIntent.charges?.data[0]?.receipt_url;
-                // if (!receiptUrl) {
-                //     try {
-                //         const charge = await stripe.charges.retrieve(paymentIntent.latest_charge);
-                //         receiptUrl = charge.receipt_url;
-                //     } catch (error) {
-                //         console.error('Error retrieving charge:', error);
-                //     }
-                // }
-
-                let receiptUrl;
-                try {
-                    // Log paymentIntent for debugging
-                    console.log('paymentIntent:', JSON.stringify(paymentIntent, null, 2));
-
-                    // Check if paymentIntent exists and has charges
-                    if (!paymentIntent || !paymentIntent.charges) {
-                        throw new Error('Invalid paymentIntent or no charges available');
-                    }
-
-                    // Try to get receipt URL from charges
-                    receiptUrl = paymentIntent.charges?.data[0]?.receipt_url;
-
-                    // Fallback to retrieving charge if receiptUrl is missing
-                    if (!receiptUrl) {
-                        if (!paymentIntent.latest_charge) {
-                            throw new Error('No latest_charge found on paymentIntent');
-                        }
+                let receiptUrl = paymentIntent.charges?.data[0]?.receipt_url;
+                if (!receiptUrl) {
+                    try {
                         const charge = await stripe.charges.retrieve(paymentIntent.latest_charge);
                         receiptUrl = charge.receipt_url;
+                    } catch (error) {
+                        console.error('Error retrieving charge:', error);
                     }
-                } catch (error) {
-                    console.error('Error retrieving receipt URL:', error.message);
-                    // Optionally, set a default or throw an error to the caller
                 }
+
                 if (user) {
                     const emailData = prepareEmailDataExp(
                         appointment,
@@ -476,7 +451,8 @@ exports.handleWebhook = async (req, res) => {
                 }
 
                 return res.json({ received: true });
-            } catch (error) {
+            } 
+            catch (error) {
                 console.error('Error processing payment intent succeeded:', error);
 
                 // Below logic is used when check_in appointment not book some error come, but time booked so here i relesed booked time
@@ -488,7 +464,10 @@ exports.handleWebhook = async (req, res) => {
 
                     if (barberSession) {
                         // Calculate the total service time to restore
-                        const totalServiceTime = appointmentData.Services.reduce((sum, service) => {
+                        // const totalServiceTime = appointmentData.Services.reduce((sum, service) => {
+                        //     return sum + (service.default_service_time || 0);
+                        // }, 0);
+                        const totalServiceTime = (appointmentData?.Services || []).reduce((sum, service) => {
                             return sum + (service.default_service_time || 0);
                         }, 0);
 
