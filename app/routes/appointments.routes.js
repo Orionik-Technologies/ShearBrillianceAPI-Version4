@@ -1985,3 +1985,4 @@ app.get(`${apiPrefix}/categorywise/user`, [authenticateJWT], appointmentsControl
 
 
 };
+
