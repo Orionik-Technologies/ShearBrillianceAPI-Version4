@@ -18,6 +18,7 @@ const { sendEmail } = require("../services/emailService");
 const{role}= require('../config/roles.config');
 const AWS = require('aws-sdk');
 const validateInput = require('../helpers/validatorHelper');  // Import the helper
+const { BarberCategoryENUM } = require("../config/barberCategory.config");
 
 let io; // Declare io in the controller's scope
 
@@ -424,7 +425,9 @@ exports.findAll = async (req, res) => {
 
             const barberWhereClause = {};
             if (salon.id) barberWhereClause.SalonId = salon.id; // Add SalonId filter if provided
-            
+            barberWhereClause.category = BarberCategoryENUM.ForWalkIn;
+
+
              // Automatically calculate today's date range
             const today = new Date();
             const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0);
@@ -719,7 +722,8 @@ exports.findOne = async (req, res) => {
 
         const barberWhereClause = {};
         if (salon.id) barberWhereClause.SalonId = salon.id; // Add SalonId filter if provided
-        
+        barberWhereClause.category = BarberCategoryENUM.ForWalkIn;
+
          // Automatically calculate today's date range
         const today = new Date();
         const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0);
